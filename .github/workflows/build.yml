@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -25,25 +26,37 @@ jobs:
           node-version: 20
 
       - name: Install root dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install viewer dependencies
         working-directory: viewer
-        run: npm install
+        run: npm ci
 
       - name: Build frontend
         working-directory: viewer
         run: npm run build
 
+      - name: Verify frontend build
+        run: ls viewer/dist/index.html
+        shell: bash
+
       - name: Build Electron (Windows)
         if: matrix.platform == 'win'
         run: npx electron-builder --win
+        env:
+          DEBUG: electron-builder
 
       - name: Build Electron (macOS)
         if: matrix.platform == 'mac'
-        run: npx electron-builder --mac
+        run: npx electron-builder --mac --x64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          DEBUG: electron-builder
+
+      - name: List release output
+        if: always()
+        run: ls -la release/ || echo "No release directory"
+        shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
