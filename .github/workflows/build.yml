@@ -65,3 +65,51 @@ jobs:
             release/*.zip
             !release/*-unpacked/**
           if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-win
+          path: artifacts/
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-mac
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f
+        shell: bash
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
+          name: X Campaign Picker v${{ steps.version.outputs.version }} (Build #${{ github.run_number }})
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            ## Downloads
+            - **Windows**: `.exe` installer
+            - **macOS**: `.dmg` disk image / `.zip` archive
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+          draft: false
+          prerelease: false
