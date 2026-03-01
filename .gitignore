@@ -38,9 +38,10 @@ build.spec
 # Debug files
 debug_*
 
-# Scrape output
-quotes_*
-retweeters_*
+# Scrape output (root only)
+/quotes_*
+/retweeters_*.json
+/retweeters_*.txt
 
 # IDE
 .idea/
