@@ -1,433 +1,522 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { startScrape, listJobs, getJobResults, getJobLogs, createWebSocket, listHistory, getHistoryResults, deleteHistory } from './api'
+import { mergeUser, GROUPS, DEFAULT_GROUP } from './constants'
+import Sidebar from './components/Sidebar'
+import AnalysisPanel from './components/AnalysisPanel'
+import ComparisonPanel from './components/ComparisonPanel'
+import { ToastContainer, useToast } from './components/Toast'
+import ConfirmModal from './components/ConfirmModal'
 
-// 公式アカウント定義（メンション + キーワード）
-const OFFICIAL_ACCOUNTS = {
-  'ぷりっつ': {
-    mentions: ['ampxtak', 'umasugi_human', 'hinekureo_dayo', 'puri_dao'],
-    keywords: ['ぷりっつ', 'プリッツ', 'ぷり民', 'priっつ']
-  },
-  'あっきぃ': {
-    mentions: ['akkkkiy', 'akkkkiysab', 'akkiydaaa'],
-    keywords: ['あっきぃ', 'アッキー', 'あっきー', 'akkiy', 'あきぃ']
-  },
-  'あっとくん': {
-    mentions: ['_AtToKun', 'AtToKun_info'],
-    keywords: ['あっとくん', 'あっと君', 'アットくん', 'あっと民', 'atto']
-  },
-  'ちぐさくん': {
-    mentions: ['Tigusa_voice', 'Tigusa_sub'],
-    keywords: ['ちぐさ', 'チグサ', 'tigusa', '千草']
-  },
-  'まぜ太': {
-    mentions: ['mazeta_666', 'mazeta_sub'],
-    keywords: ['まぜ太', 'まぜた', 'マゼタ', 'mazeta']
-  },
-  'けちゃ': {
-    mentions: ['ketchup_N1', 'ketchup_N2'],
-    keywords: ['けちゃ', 'ケチャ', 'ketchup', 'けちゃっぷ']
-  },
-}
-
-// ハートの絵文字と色名
-const HEART_EMOJIS = {
-  '❤️': { name: '赤', color: '#ef4444' },
-  '🧡': { name: 'オレンジ', color: '#f97316' },
-  '💛': { name: '黄色', color: '#eab308' },
-  '💚': { name: '緑', color: '#22c55e' },
-  '💙': { name: '青', color: '#3b82f6' },
-  '💜': { name: '紫', color: '#a855f7' },
-  '🖤': { name: '黒', color: '#1f2937' },
-  '🤍': { name: '白', color: '#e5e7eb' },
-  '🤎': { name: '茶', color: '#a16207' },
-  '💗': { name: 'ピンク(成長)', color: '#ec4899' },
-  '💖': { name: 'ピンク(輝)', color: '#f472b6' },
-  '💕': { name: 'ダブルハート', color: '#f9a8d4' },
-  '💞': { name: '回転ハート', color: '#fb7185' },
-  '💓': { name: '鼓動', color: '#f43f5e' },
-  '💘': { name: '矢ハート', color: '#be123c' },
-  '💝': { name: 'リボンハート', color: '#fbbf24' },
-}
+const TABS = [
+  { id: 'analysis', label: '📋 分析', desc: 'ユーザー一覧・統計' },
+  { id: 'comparison', label: '📊 比較', desc: 'グループ間比較チャート' },
+]
 
 function App() {
-  const [users, setUsers] = useState([])
+  // トースト通知
+  const { toasts, addToast, removeToast } = useToast()
+
+  // 確認モーダル
+  const [confirmState, setConfirmState] = useState({ open: false })
+  const showConfirm = useCallback(({ title, message, confirmLabel, danger }) => {
+    return new Promise((resolve) => {
+      setConfirmState({
+        open: true,
+        title,
+        message,
+        confirmLabel,
+        danger,
+        onConfirm: () => { setConfirmState({ open: false }); resolve(true) },
+        onCancel: () => { setConfirmState({ open: false }); resolve(false) },
+      })
+    })
+  }, [])
+
+  // タブ
+  const [activeTab, setActiveTab] = useState('analysis')
+
+  // グループ選択
+  const [selectedGroup, setSelectedGroup] = useState(DEFAULT_GROUP)
+
+  // ユーザーデータ（共通: 分析パネル用）
+  const [userMap, setUserMap] = useState({})
+  const [importedFiles, setImportedFiles] = useState([])
+
+  // グループ別ユーザーデータ（比較パネル用）
+  const [groupUserMaps, setGroupUserMaps] = useState({ amptakcolors: {}, sneakerstep: {}, knightx: {}, meteora: {} })
+
+  // フィルター
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMention, setFilterMention] = useState('')
   const [filterHeart, setFilterHeart] = useState('')
+  const [filterDm, setFilterDm] = useState('')
+  const [filterSource, setFilterSource] = useState('')
   const [sortBy, setSortBy] = useState('index')
 
-  // JSONファイルインポート
-  const handleFileImport = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+  // ジョブ管理
+  const [jobs, setJobs] = useState([])
+  const [selectedJobId, setSelectedJobId] = useState(null)
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
+  // 履歴
+  const [history, setHistory] = useState([])
+
+  // WebSocket
+  const [logs, setLogs] = useState({})
+  const [connected, setConnected] = useState(false)
+  const wsRef = useRef(null)
+  const reconnectRef = useRef(null)
+
+  const users = useMemo(() => Object.values(userMap), [userMap])
+
+  const allFileNames = useMemo(() =>
+    [...new Set(importedFiles.map(f => f.name))],
+    [importedFiles]
+  )
+
+  const hasRunningJob = useMemo(() =>
+    jobs.some(j => j.status === 'running'),
+    [jobs]
+  )
+
+  // 比較用のユーザーリスト
+  const ampUsers = useMemo(() => Object.values(groupUserMaps.amptakcolors), [groupUserMaps.amptakcolors])
+  const snkUsers = useMemo(() => Object.values(groupUserMaps.sneakerstep), [groupUserMaps.sneakerstep])
+  const knxUsers = useMemo(() => Object.values(groupUserMaps.knightx), [groupUserMaps.knightx])
+  const mtorUsers = useMemo(() => Object.values(groupUserMaps.meteora), [groupUserMaps.meteora])
+
+  // グループ別にユーザーを追加するヘルパー
+  const addUsersToGroup = useCallback((group, results, sourceName) => {
+    setGroupUserMaps(prev => {
+      const groupMap = { ...prev[group] }
+      for (const user of results) {
+        const key = user.username
+        if (!key) continue
+        if (groupMap[key]) {
+          groupMap[key] = mergeUser(groupMap[key], user, sourceName)
+        } else {
+          groupMap[key] = { ...user, _sources: [sourceName] }
+        }
+      }
+      return { ...prev, [group]: groupMap }
+    })
+  }, [])
+
+  // --- WebSocket 接続 ---
+  const connectWs = useCallback(() => {
+    try {
+      const ws = createWebSocket()
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setConnected(true)
+        ws.send('ping')
+      }
+
+      ws.onclose = () => {
+        setConnected(false)
+        wsRef.current = null
+        reconnectRef.current = setTimeout(connectWs, 2000)
+      }
+
+      ws.onerror = () => {
+        ws.close()
+      }
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'log') {
+          setLogs(prev => ({
+            ...prev,
+            [msg.job_id]: [...(prev[msg.job_id] || []), msg.line],
+          }))
+        } else if (msg.type === 'status') {
+          fetchJobs()
+        }
+      }
+    } catch {
+      reconnectRef.current = setTimeout(connectWs, 2000)
+    }
+  }, [])
+
+  useEffect(() => {
+    connectWs()
+    return () => {
+      if (wsRef.current) wsRef.current.close()
+      if (reconnectRef.current) clearTimeout(reconnectRef.current)
+    }
+  }, [connectWs])
+
+  // --- 履歴取得 ---
+  const fetchHistory = useCallback(async () => {
+    try {
+      const data = await listHistory()
+      setHistory(data)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchHistory()
+  }, [fetchHistory])
+
+  // --- ジョブ一覧のポーリング ---
+  const fetchJobs = useCallback(async () => {
+    try {
+      const data = await listJobs()
+      setJobs(prev => {
+        for (const job of data) {
+          const old = prev.find(j => j.id === job.id)
+          if (old && old.status === 'running' && job.status === 'completed') {
+            addToast(`取得完了: ${job.result_count}人のデータを取得しました`, 'success')
+            fetchHistory()
+            break
+          }
+          if (old && old.status === 'running' && job.status === 'failed') {
+            addToast(`取得失敗: ${job.error || 'エラーが発生しました'}`, 'error', 6000)
+            fetchHistory()
+            break
+          }
+        }
+        return data
+      })
+    } catch {
+      // サーバー未起動時は無視
+    }
+  }, [fetchHistory, addToast])
+
+  useEffect(() => {
+    fetchJobs()
+    const interval = setInterval(fetchJobs, 2000)
+    return () => clearInterval(interval)
+  }, [fetchJobs])
+
+  // --- REST API ログポーリング ---
+  useEffect(() => {
+    if (!selectedJobId) return
+    const runningJob = jobs.find(j => j.id === selectedJobId && (j.status === 'running' || j.status === 'completed'))
+    if (!runningJob) return
+
+    const pollLogs = async () => {
       try {
-        const data = JSON.parse(event.target.result)
-        setUsers(Array.isArray(data) ? data : [])
-      } catch (err) {
-        alert('JSONファイルの読み込みに失敗しました')
-      }
-    }
-    reader.readAsText(file)
-  }
-
-  // 統計計算
-  const stats = useMemo(() => {
-    if (users.length === 0) return null
-
-    // ファンマーク（メンション）カウント
-    const mentionCounts = {}
-    Object.entries(OFFICIAL_ACCOUNTS).forEach(([name, accounts]) => {
-      mentionCounts[name] = {
-        accounts,
-        count: 0,
-        users: []
-      }
-    })
-
-    // ハートカウント
-    const heartCounts = {}
-    Object.entries(HEART_EMOJIS).forEach(([emoji, info]) => {
-      heartCounts[emoji] = {
-        ...info,
-        emoji,
-        count: 0,
-        users: []
-      }
-    })
-
-    // 各ユーザーを分析
-    users.forEach(user => {
-      const bio = (user.bio || '') + ' ' + (user.name || '')
-
-      // メンション・キーワードチェック
-      Object.entries(OFFICIAL_ACCOUNTS).forEach(([name, data]) => {
-        const bioLower = bio.toLowerCase()
-
-        // @メンションチェック
-        const hasMention = data.mentions.some(acc =>
-          bioLower.includes(`@${acc.toLowerCase()}`)
-        )
-
-        // キーワードチェック
-        const hasKeyword = data.keywords.some(kw =>
-          bioLower.includes(kw.toLowerCase())
-        )
-
-        if (hasMention || hasKeyword) {
-          mentionCounts[name].count++
-          mentionCounts[name].users.push(user.username)
+        const data = await getJobLogs(selectedJobId)
+        if (data.lines && data.lines.length > 0) {
+          setLogs(prev => {
+            const currentLines = prev[selectedJobId] || []
+            if (data.lines.length > currentLines.length) {
+              return { ...prev, [selectedJobId]: data.lines }
+            }
+            return prev
+          })
         }
+      } catch {
+        // ignore
+      }
+    }
+
+    pollLogs()
+    const interval = setInterval(pollLogs, 1000)
+    return () => clearInterval(interval)
+  }, [selectedJobId, jobs])
+
+  // --- スクレイプ開始 ---
+  const handleStartScrape = useCallback(async ({ scraperType, url, maxUsers }) => {
+    try {
+      const result = await startScrape({ scraperType, url, maxUsers })
+      if (result.error) {
+        addToast(result.error, 'error', 6000)
+        return
+      }
+      setSelectedJobId(result.job_id)
+      addToast('データ取得を開始しました', 'info')
+      fetchJobs()
+    } catch (err) {
+      addToast('サーバーに接続できません。バックエンドが起動しているか確認してください。', 'error', 8000)
+    }
+  }, [fetchJobs, addToast])
+
+  // --- 結果をViewerに読込 ---
+  const handleLoadResults = useCallback(async (jobId) => {
+    try {
+      const results = await getJobResults(jobId)
+      if (!Array.isArray(results)) return
+
+      const job = jobs.find(j => j.id === jobId)
+      const sourceName = job
+        ? `${job.scraper_type}_${job.id}`
+        : `job_${jobId}`
+
+      setUserMap(prev => {
+        const next = { ...prev }
+        for (const user of results) {
+          const key = user.username
+          if (!key) continue
+          if (next[key]) {
+            next[key] = mergeUser(next[key], user, sourceName)
+          } else {
+            next[key] = { ...user, _sources: [sourceName] }
+          }
+        }
+        return next
       })
 
-      // ハートチェック
-      Object.keys(HEART_EMOJIS).forEach(emoji => {
-        if (bio.includes(emoji)) {
-          heartCounts[emoji].count++
-          heartCounts[emoji].users.push(user.username)
+      setImportedFiles(prev => [
+        ...prev,
+        { name: sourceName, count: results.length }
+      ])
+
+      // 比較用にも現在のグループに追加
+      addUsersToGroup(selectedGroup, results, sourceName)
+
+      addToast(`${results.length}人のデータを読み込みました（${GROUPS[selectedGroup]?.fanMark || ''} ${GROUPS[selectedGroup]?.name || selectedGroup}）`, 'success')
+    } catch {
+      addToast('結果の読み込みに失敗しました', 'error')
+    }
+  }, [jobs, addToast, selectedGroup, addUsersToGroup])
+
+  // --- JSONファイル手動インポート ---
+  const handleFileImport = useCallback((e) => {
+    const files = Array.from(e.target.files)
+    if (files.length === 0) return
+
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target.result)
+          const arr = Array.isArray(data) ? data : []
+
+          setUserMap(prev => {
+            const next = { ...prev }
+            for (const user of arr) {
+              const key = user.username
+              if (!key) continue
+              if (next[key]) {
+                next[key] = mergeUser(next[key], user, file.name)
+              } else {
+                next[key] = { ...user, _sources: [file.name] }
+              }
+            }
+            return next
+          })
+
+          setImportedFiles(prev => [...prev, { name: file.name, count: arr.length }])
+
+          // 比較用にも現在のグループに追加
+          addUsersToGroup(selectedGroup, arr, file.name)
+
+          addToast(`${file.name} を読み込みました (${arr.length}人 → ${GROUPS[selectedGroup]?.fanMark || ''} ${GROUPS[selectedGroup]?.name || ''})`, 'success')
+        } catch {
+          addToast(`${file.name} の読み込みに失敗しました。JSONファイルか確認してください。`, 'error')
         }
-      })
+      }
+      reader.readAsText(file)
     })
 
-    return { mentionCounts, heartCounts }
-  }, [users])
+    e.target.value = ''
+  }, [addToast, selectedGroup, addUsersToGroup])
 
-  // フィルタリング
-  const filteredUsers = useMemo(() => {
-    let result = [...users]
+  // --- 履歴から読込 ---
+  const handleLoadHistory = useCallback(async (jobId) => {
+    try {
+      const results = await getHistoryResults(jobId)
+      if (!Array.isArray(results)) return
 
-    // テキスト検索
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(user =>
-        (user.username || '').toLowerCase().includes(q) ||
-        (user.name || '').toLowerCase().includes(q) ||
-        (user.bio || '').toLowerCase().includes(q)
-      )
-    }
+      const historyJob = history.find(j => j.id === jobId)
+      const sourceName = historyJob
+        ? `${historyJob.scraper_type}_${historyJob.id}`
+        : `history_${jobId}`
 
-    // メンション・キーワードフィルター
-    if (filterMention && OFFICIAL_ACCOUNTS[filterMention]) {
-      const data = OFFICIAL_ACCOUNTS[filterMention]
-      result = result.filter(user => {
-        const bio = (user.bio || '') + ' ' + (user.name || '')
-        const bioLower = bio.toLowerCase()
-
-        const hasMention = data.mentions.some(acc =>
-          bioLower.includes(`@${acc.toLowerCase()}`)
-        )
-        const hasKeyword = data.keywords.some(kw =>
-          bioLower.includes(kw.toLowerCase())
-        )
-
-        return hasMention || hasKeyword
+      setUserMap(prev => {
+        const next = { ...prev }
+        for (const user of results) {
+          const key = user.username
+          if (!key) continue
+          if (next[key]) {
+            next[key] = mergeUser(next[key], user, sourceName)
+          } else {
+            next[key] = { ...user, _sources: [sourceName] }
+          }
+        }
+        return next
       })
+
+      setImportedFiles(prev => [
+        ...prev,
+        { name: sourceName, count: results.length }
+      ])
+
+      // 比較用にも現在のグループに追加
+      addUsersToGroup(selectedGroup, results, sourceName)
+
+      addToast(`履歴から${results.length}人のデータを読み込みました（${GROUPS[selectedGroup]?.fanMark || ''} ${GROUPS[selectedGroup]?.name || ''}）`, 'success')
+    } catch {
+      addToast('履歴データの読み込みに失敗しました', 'error')
     }
+  }, [history, addToast, selectedGroup, addUsersToGroup])
 
-    // ハートフィルター
-    if (filterHeart) {
-      result = result.filter(user => {
-        const bio = (user.bio || '') + ' ' + (user.name || '')
-        return bio.includes(filterHeart)
-      })
+  // --- 履歴削除 ---
+  const handleDeleteHistory = useCallback(async (jobId) => {
+    const confirmed = await showConfirm({
+      title: '履歴の削除',
+      message: 'この履歴を削除しますか？この操作は取り消せません。',
+      confirmLabel: '削除する',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await deleteHistory(jobId)
+      fetchHistory()
+      addToast('履歴を削除しました', 'info')
+    } catch {
+      addToast('削除に失敗しました', 'error')
     }
+  }, [fetchHistory, showConfirm, addToast])
 
-    // ソート
-    if (sortBy === 'username') {
-      result.sort((a, b) => (a.username || '').localeCompare(b.username || ''))
-    } else if (sortBy === 'name') {
-      result.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-    } else if (sortBy === 'followers') {
-      result.sort((a, b) => {
-        const aCount = parseFollowerCount(a.followers_count)
-        const bCount = parseFollowerCount(b.followers_count)
-        return bCount - aCount
-      })
-    }
-
-    return result
-  }, [users, searchQuery, filterMention, filterHeart, sortBy])
-
-  // フォロワー数をパース
-  function parseFollowerCount(str) {
-    if (!str) return 0
-    const num = parseFloat(str.replace(/,/g, ''))
-    if (str.includes('K')) return num * 1000
-    if (str.includes('M')) return num * 1000000
-    return num || 0
-  }
+  // --- 全データクリア ---
+  const handleClear = useCallback(async () => {
+    const confirmed = await showConfirm({
+      title: 'データのクリア',
+      message: '読み込んだ全てのユーザーデータをクリアしますか？（比較データも含む）',
+      confirmLabel: 'クリアする',
+      danger: true,
+    })
+    if (!confirmed) return
+    setUserMap({})
+    setImportedFiles([])
+    setGroupUserMaps({ amptakcolors: {}, sneakerstep: {}, knightx: {}, meteora: {} })
+    setSearchQuery('')
+    setFilterMention('')
+    setFilterHeart('')
+    setFilterDm('')
+    setFilterSource('')
+    setSortBy('index')
+    addToast('データをクリアしました', 'info')
+  }, [showConfirm, addToast])
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="h-screen bg-gray-900 text-white flex flex-col overflow-hidden">
+      {/* トースト通知 */}
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+      {/* 確認モーダル */}
+      <ConfirmModal
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel}
+        danger={confirmState.danger}
+        onConfirm={confirmState.onConfirm}
+        onCancel={confirmState.onCancel}
+      />
+
       {/* ヘッダー */}
-      <header className="bg-gray-800 border-b border-gray-700 p-4">
-        <h1 className="text-2xl font-bold text-center">X ユーザー分析ツール</h1>
+      <header className="bg-gray-800 border-b border-gray-700 px-6 py-2.5 flex-shrink-0 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-bold tracking-tight">X Campaign Picker</h1>
+          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} title={connected ? '接続中' : 'オフライン'} />
+
+          {/* メインタブ */}
+          <div className="flex bg-gray-700/50 rounded-lg p-0.5 ml-2">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-1.5 text-sm rounded-md transition font-medium ${
+                  activeTab === tab.id
+                    ? 'bg-gray-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+                title={tab.desc}
+              >
+                {tab.label}
+                {tab.id === 'comparison' && (ampUsers.length > 0 || snkUsers.length > 0 || knxUsers.length > 0 || mtorUsers.length > 0) && (
+                  <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-yellow-600 text-white rounded-full">
+                    {ampUsers.length + snkUsers.length + knxUsers.length + mtorUsers.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">分析グループ:</span>
+          <div className="flex bg-gray-700 rounded-lg p-0.5">
+            {Object.entries(GROUPS).map(([id, group]) => {
+              const groupCount = Object.keys(groupUserMaps[id] || {}).length
+              return (
+                <button
+                  key={id}
+                  onClick={() => { setSelectedGroup(id); setFilterMention('') }}
+                  className={`px-3 py-1.5 text-sm rounded-md transition font-medium flex items-center gap-1.5 ${
+                    selectedGroup === id
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-600'
+                  }`}
+                >
+                  {group.fanMark} {group.name}
+                  {groupCount > 0 && (
+                    <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold ${
+                      selectedGroup === id ? 'bg-white/20' : 'bg-gray-600'
+                    }`}>
+                      {groupCount}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </header>
 
-      <div className="container mx-auto p-4">
-        {/* インポート */}
-        <div className="mb-6 p-4 bg-gray-800 rounded-lg">
-          <label className="block mb-2 font-semibold">JSONファイルをインポート</label>
-          <input
-            type="file"
-            accept=".json"
-            onChange={handleFileImport}
-            className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
-          />
-          {users.length > 0 && (
-            <p className="mt-2 text-green-400">✓ {users.length}人のユーザーを読み込みました</p>
-          )}
-        </div>
+      {/* メインレイアウト */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* サイドバー */}
+        <Sidebar
+          jobs={jobs}
+          logs={logs}
+          connected={connected}
+          onStartScrape={handleStartScrape}
+          onSelectJob={setSelectedJobId}
+          onLoadResults={handleLoadResults}
+          selectedJobId={selectedJobId}
+          hasRunningJob={hasRunningJob}
+          history={history}
+          onLoadHistory={handleLoadHistory}
+          onDeleteHistory={handleDeleteHistory}
+        />
 
-        {users.length > 0 && (
-          <>
-            {/* 統計 */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-              {/* ファンマークカウント */}
-              <div className="p-4 bg-gray-800 rounded-lg">
-                <h2 className="text-lg font-semibold mb-3">📌 ファンマーク（メンション）カウント</h2>
-                <div className="space-y-2">
-                  {stats && Object.entries(stats.mentionCounts)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([name, data]) => (
-                      <div
-                        key={name}
-                        className={`flex items-center justify-between p-2 rounded cursor-pointer transition ${filterMention === name ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        onClick={() => setFilterMention(filterMention === name ? '' : name)}
-                      >
-                        <span>{name}</span>
-                        <span className="font-bold text-xl">{data.count}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-
-              {/* ハートカウント */}
-              <div className="p-4 bg-gray-800 rounded-lg">
-                <h2 className="text-lg font-semibold mb-3">💖 ハート絵文字カウント</h2>
-                <div className="grid grid-cols-2 gap-2">
-                  {stats && Object.entries(stats.heartCounts)
-                    .filter(([, data]) => data.count > 0)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([emoji, data]) => (
-                      <div
-                        key={emoji}
-                        className={`flex items-center justify-between p-2 rounded cursor-pointer transition ${filterHeart === emoji ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        onClick={() => setFilterHeart(filterHeart === emoji ? '' : emoji)}
-                      >
-                        <span>
-                          <span className="text-xl mr-2">{emoji}</span>
-                          <span className="text-sm text-gray-300">{data.name}</span>
-                        </span>
-                        <span className="font-bold">{data.count}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-
-            {/* 検索・フィルター */}
-            <div className="mb-4 p-4 bg-gray-800 rounded-lg">
-              <div className="flex flex-wrap gap-4">
-                <div className="flex-1 min-w-64">
-                  <label className="block text-sm mb-1">検索（ユーザー名・名前・プロフ）</label>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="検索..."
-                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">ソート</label>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="p-2 bg-gray-700 rounded border border-gray-600"
-                  >
-                    <option value="index">取得順</option>
-                    <option value="username">ユーザー名</option>
-                    <option value="name">表示名</option>
-                    <option value="followers">フォロワー数</option>
-                  </select>
-                </div>
-                {(filterMention || filterHeart || searchQuery) && (
-                  <button
-                    onClick={() => {
-                      setFilterMention('')
-                      setFilterHeart('')
-                      setSearchQuery('')
-                    }}
-                    className="self-end p-2 bg-red-600 hover:bg-red-700 rounded"
-                  >
-                    フィルタークリア
-                  </button>
-                )}
-              </div>
-              <div className="mt-2 text-sm text-gray-400">
-                表示中: {filteredUsers.length} / {users.length}人
-                {filterMention && <span className="ml-2 text-blue-400">| {filterMention}のファン</span>}
-                {filterHeart && <span className="ml-2 text-pink-400">| {filterHeart}を含む</span>}
-              </div>
-            </div>
-
-            {/* ユーザー一覧 */}
-            <div className="space-y-2">
-              {filteredUsers.map((user, index) => (
-                <UserCard key={user.username || index} user={user} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ユーザーカード
-function UserCard({ user }) {
-  const [expanded, setExpanded] = useState(false)
-
-  // このユーザーがファンとして検出されるアカウント
-  const mentionedAccounts = useMemo(() => {
-    const bio = (user.bio || '') + ' ' + (user.name || '')
-    const bioLower = bio.toLowerCase()
-    const mentioned = []
-
-    Object.entries(OFFICIAL_ACCOUNTS).forEach(([name, data]) => {
-      const hasMention = data.mentions.some(acc =>
-        bioLower.includes(`@${acc.toLowerCase()}`)
-      )
-      const hasKeyword = data.keywords.some(kw =>
-        bioLower.includes(kw.toLowerCase())
-      )
-
-      if (hasMention || hasKeyword) {
-        mentioned.push(name)
-      }
-    })
-    return mentioned
-  }, [user])
-
-  // このユーザーが使っているハート
-  const usedHearts = useMemo(() => {
-    const bio = (user.bio || '') + ' ' + (user.name || '')
-    return Object.keys(HEART_EMOJIS).filter(emoji => bio.includes(emoji))
-  }, [user])
-
-  return (
-    <div className="p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
-      <div className="flex items-start gap-3">
-        {/* アバター */}
-        {user.profile_image_url && (
-          <img
-            src={user.profile_image_url}
-            alt=""
-            className="w-12 h-12 rounded-full"
-          />
-        )}
-
-        <div className="flex-1 min-w-0">
-          {/* 名前・ユーザー名 */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold">{user.name || '名前なし'}</span>
-            {user.verified && <span className="text-blue-400">✓</span>}
-            <a
-              href={`https://x.com/${user.username}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-gray-400 hover:text-blue-400"
-            >
-              @{user.username}
-            </a>
-          </div>
-
-          {/* バッジ */}
-          <div className="flex flex-wrap gap-1 mt-1">
-            {mentionedAccounts.map(name => (
-              <span key={name} className="px-2 py-0.5 text-xs bg-blue-600 rounded">
-                {name}ファン
-              </span>
-            ))}
-            {usedHearts.length > 0 && (
-              <span className="px-2 py-0.5 text-xs bg-pink-600 rounded">
-                {usedHearts.join('')}
-              </span>
-            )}
-          </div>
-
-          {/* フォロワー数 */}
-          {(user.followers_count || user.following_count) && (
-            <div className="text-xs text-gray-400 mt-1">
-              {user.followers_count && <span className="mr-3">フォロワー: {user.followers_count}</span>}
-              {user.following_count && <span>フォロー中: {user.following_count}</span>}
-            </div>
+        {/* メインエリア */}
+        <main className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'analysis' && (
+            <AnalysisPanel
+              users={users}
+              userMap={userMap}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              filterMention={filterMention}
+              setFilterMention={setFilterMention}
+              filterHeart={filterHeart}
+              setFilterHeart={setFilterHeart}
+              filterDm={filterDm}
+              setFilterDm={setFilterDm}
+              filterSource={filterSource}
+              setFilterSource={setFilterSource}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              allFileNames={allFileNames}
+              onFileImport={handleFileImport}
+              onClear={handleClear}
+              importedFiles={importedFiles}
+              selectedGroup={selectedGroup}
+            />
           )}
 
-          {/* プロフィール */}
-          {user.bio && (
-            <p
-              className={`text-sm text-gray-300 mt-2 whitespace-pre-wrap ${!expanded && 'line-clamp-2'}`}
-              onClick={() => setExpanded(!expanded)}
-            >
-              {user.bio}
-            </p>
+          {activeTab === 'comparison' && (
+            <ComparisonPanel ampUsers={ampUsers} snkUsers={snkUsers} knxUsers={knxUsers} mtorUsers={mtorUsers} />
           )}
-
-          {/* 場所・URL */}
-          {(user.location || user.url) && (
-            <div className="text-xs text-gray-400 mt-1">
-              {user.location && <span className="mr-3">📍 {user.location}</span>}
-              {user.url && (
-                <a href={user.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                  🔗 {user.url}
-                </a>
-              )}
-            </div>
-          )}
-        </div>
+        </main>
       </div>
     </div>
   )

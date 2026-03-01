@@ -23,9 +23,24 @@ __pycache__/
 .venv/
 venv/
 
-# Node.js (viewer)
+# Node.js
+node_modules/
 viewer/node_modules/
 viewer/dist/
+
+# Electron build output
+release/
+dist/
+build/build/
+build.spec
+*.blockmap
+
+# Debug files
+debug_*
+
+# Scrape output
+quotes_*
+retweeters_*
 
 # IDE
 .idea/

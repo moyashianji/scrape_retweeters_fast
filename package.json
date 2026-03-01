@@ -1,0 +1,54 @@
+{
+  "name": "x-campaign-picker",
+  "private": true,
+  "version": "1.0.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:preview": "node scripts/launch-electron.js",
+    "electron:build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.xcampaignpicker.app",
+    "productName": "X Campaign Picker",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "viewer/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend-bundle/backend",
+        "filter": [
+          "**/*.py"
+        ]
+      },
+      {
+        "from": "scrapers",
+        "to": "backend-bundle/scrapers",
+        "filter": [
+          "**/*.py"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.utilities"
+    }
+  }
+}

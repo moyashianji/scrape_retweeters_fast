@@ -20,8 +20,7 @@ def scrape_retweeters(url, max_users=500):
     print("リツイーター取得 (プロフィール付き)")
     print("=" * 60)
     print(f"\nURL: {url}")
-    print(f"最大取得数: {max_users}人")
-
+    print(f"最大取得数: {max_users}人"
     # 専用プロファイル
     profile_dir = os.path.join(os.path.dirname(__file__), "x_chrome_profile")
     os.makedirs(profile_dir, exist_ok=True)
