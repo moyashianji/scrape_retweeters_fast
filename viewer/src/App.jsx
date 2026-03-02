@@ -488,7 +488,7 @@ function App() {
         />
 
         {/* メインエリア */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className={`flex-1 p-6 ${activeTab === 'analysis' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {activeTab === 'analysis' && (
             <AnalysisPanel
               users={users}

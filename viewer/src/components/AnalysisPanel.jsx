@@ -131,19 +131,40 @@ export default function AnalysisPanel({
 
   // 仮想スクロール用
   const listRef = useRef(null)
-  const containerRef = useRef(null)
-  const [listHeight, setListHeight] = useState(600)
+  const outerRef = useRef(null)
+  const controlsRef = useRef(null)
+  const [listHeight, setListHeight] = useState(400)
 
-  // コンテナの高さを測定
+  // リスト高さを算出（outer全体 - controls部分 = リスト領域）
   useEffect(() => {
-    if (!containerRef.current) return
-    const obs = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setListHeight(entry.contentRect.height)
+    const outer = outerRef.current
+    const controls = controlsRef.current
+    if (!outer || !controls) return
+
+    const updateHeight = () => {
+      let parentH = outer.clientHeight
+      // clientHeight が 0 の場合: ウィンドウ下端から算出
+      if (parentH < 50) {
+        parentH = window.innerHeight - outer.getBoundingClientRect().top
       }
-    })
-    obs.observe(containerRef.current)
-    return () => obs.disconnect()
+      const controlsH = controls.offsetHeight
+      const h = parentH - controlsH
+      if (h > 100) setListHeight(Math.floor(h))
+    }
+
+    updateHeight()
+    const timer = setTimeout(updateHeight, 100)
+
+    const obs = new ResizeObserver(updateHeight)
+    obs.observe(outer)
+    obs.observe(controls)
+    window.addEventListener('resize', updateHeight)
+
+    return () => {
+      obs.disconnect()
+      window.removeEventListener('resize', updateHeight)
+      clearTimeout(timer)
+    }
   }, [users.length > 0])
 
   // フィルター/ソート変更時にリストを先頭に戻す
@@ -253,9 +274,11 @@ export default function AnalysisPanel({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div ref={outerRef} className="flex flex-col h-full overflow-hidden">
+      {/* コントロール部分（ヘッダー + 統計 + 検索） */}
+      <div ref={controlsRef} className="flex-shrink-0 overflow-y-auto" style={{ maxHeight: '55vh' }}>
       {/* ヘッダーバー */}
-      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex items-center justify-between flex-shrink-0">
+      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold flex items-center gap-2">
             📊 分析結果
@@ -548,15 +571,17 @@ export default function AnalysisPanel({
         )}
       </div>
 
+      </div>{/* controls 閉じ */}
+
       {/* ユーザー一覧（仮想スクロール） */}
       {filteredUsers.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 flex-shrink-0">
+        <div className="text-center py-12 text-gray-500">
           <div className="text-4xl mb-3">🔍</div>
           <p className="text-sm">条件に一致するユーザーが見つかりません</p>
           <p className="text-xs mt-1">フィルター条件を変更してみてください</p>
         </div>
       ) : (
-        <div ref={containerRef} className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0">
           <VariableSizeList
             ref={listRef}
             height={listHeight}
