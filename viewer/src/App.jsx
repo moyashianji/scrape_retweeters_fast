@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { startScrape, listJobs, getJobResults, getJobLogs, createWebSocket, listHistory, getHistoryResults, deleteHistory } from './api'
-import { mergeUser, GROUPS, DEFAULT_GROUP } from './constants'
+import { mergeUser, GROUPS, DEFAULT_GROUP, computeStatsOnePass } from './constants'
 import Sidebar from './components/Sidebar'
 import AnalysisPanel from './components/AnalysisPanel'
 import ComparisonPanel from './components/ComparisonPanel'
+import StatsFilterPanel from './components/StatsFilterPanel'
 import { ToastContainer, useToast } from './components/Toast'
 import ConfirmModal from './components/ConfirmModal'
 
@@ -67,6 +68,18 @@ function App() {
   const reconnectRef = useRef(null)
 
   const users = useMemo(() => Object.values(userMap), [userMap])
+
+  // 右サイドバー
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+
+  // グループメンバー（stats + フィルタリングで共有）
+  const officialAccounts = useMemo(() => GROUPS[selectedGroup]?.members || {}, [selectedGroup])
+
+  // 統計（AnalysisPanel + StatsFilterPanel で共有）
+  const stats = useMemo(() => {
+    if (users.length === 0) return null
+    return computeStatsOnePass(users, officialAccounts, selectedGroup)
+  }, [users, officialAccounts, selectedGroup])
 
   const allFileNames = useMemo(() =>
     [...new Set(importedFiles.map(f => f.name))],
@@ -493,6 +506,7 @@ function App() {
             <AnalysisPanel
               users={users}
               userMap={userMap}
+              stats={stats}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               filterMention={filterMention}
@@ -517,6 +531,22 @@ function App() {
             <ComparisonPanel ampUsers={ampUsers} snkUsers={snkUsers} knxUsers={knxUsers} mtorUsers={mtorUsers} />
           )}
         </main>
+
+        {/* 右サイドバー（統計・フィルター） */}
+        {activeTab === 'analysis' && users.length > 0 && (
+          <StatsFilterPanel
+            stats={stats}
+            officialAccounts={officialAccounts}
+            filterMention={filterMention}
+            setFilterMention={setFilterMention}
+            filterHeart={filterHeart}
+            setFilterHeart={setFilterHeart}
+            filterDm={filterDm}
+            setFilterDm={setFilterDm}
+            isOpen={rightSidebarOpen}
+            onToggle={() => setRightSidebarOpen(v => !v)}
+          />
+        )}
       </div>
     </div>
   )

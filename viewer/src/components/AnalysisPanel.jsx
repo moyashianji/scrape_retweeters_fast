@@ -1,8 +1,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import { VariableSizeList } from 'react-window'
-import { GROUPS, HEART_EMOJIS, parseFollowerCount, computeStatsOnePass, getUserSearchText } from '../constants'
+import { GROUPS, parseFollowerCount, getUserSearchText } from '../constants'
 import UserCard from './UserCard'
-import HelpTip from './HelpTip'
 
 const FIELD_OPTIONS = [
   { key: 'followers', label: 'フォロワー数' },
@@ -65,7 +64,7 @@ function ActiveFilters({ filterMention, filterHeart, filterDm, filterSource, sea
   if (chips.length === 0) return null
 
   return (
-    <div className="flex flex-wrap gap-2 mb-4">
+    <div className="flex flex-wrap gap-2 mb-3">
       {chips.map((chip, i) => (
         <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600/20 border border-blue-500/30 rounded-full text-xs text-blue-300">
           {chip.label}
@@ -107,7 +106,7 @@ const UserRow = ({ index, style, data }) => {
 }
 
 export default function AnalysisPanel({
-  users, userMap,
+  users, userMap, stats,
   searchQuery, setSearchQuery,
   filterMention, setFilterMention,
   filterHeart, setFilterHeart,
@@ -126,7 +125,6 @@ export default function AnalysisPanel({
     return defaults
   })
   const [showFieldSettings, setShowFieldSettings] = useState(false)
-  const [statsCollapsed, setStatsCollapsed] = useState(false)
   const [compactCards, setCompactCards] = useState(false)
 
   // 仮想スクロール用
@@ -143,7 +141,6 @@ export default function AnalysisPanel({
 
     const updateHeight = () => {
       let parentH = outer.clientHeight
-      // clientHeight が 0 の場合: ウィンドウ下端から算出
       if (parentH < 50) {
         parentH = window.innerHeight - outer.getBoundingClientRect().top
       }
@@ -172,12 +169,6 @@ export default function AnalysisPanel({
     listRef.current?.scrollTo(0)
   }, [searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy])
 
-  // === 統計: 1パスで全集計 ===
-  const stats = useMemo(() => {
-    if (users.length === 0) return null
-    return computeStatsOnePass(users, officialAccounts, selectedGroup)
-  }, [users, officialAccounts, selectedGroup])
-
   // === フィルタリング（fanMapキャッシュを利用） ===
   const filteredUsers = useMemo(() => {
     let result = [...users]
@@ -192,7 +183,6 @@ export default function AnalysisPanel({
     }
 
     if (filterMention && officialAccounts[filterMention] && stats) {
-      // fanMap からキャッシュ利用（detectFanOf再計算不要）
       result = result.filter(user => {
         const fans = stats.fanMap.get(user.username)
         return fans && fans.includes(filterMention)
@@ -275,303 +265,165 @@ export default function AnalysisPanel({
 
   return (
     <div ref={outerRef} className="flex flex-col h-full overflow-hidden">
-      {/* コントロール部分（ヘッダー + 統計 + 検索） */}
-      <div ref={controlsRef} className="flex-shrink-0 overflow-y-auto" style={{ maxHeight: '55vh' }}>
-      {/* ヘッダーバー */}
-      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            📊 分析結果
-            <span className="text-sm font-normal text-gray-400">
-              {users.length.toLocaleString()}人のデータ
-            </span>
-          </h2>
-          {importedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {importedFiles.map((f, i) => (
-                <span key={i} className="px-2 py-0.5 text-[11px] bg-gray-700 rounded">{f.name} ({f.count})</span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="cursor-pointer">
-            <span className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 rounded-lg transition font-medium inline-block">
-              + ファイル追加
-            </span>
-            <input type="file" accept=".json" multiple onChange={onFileImport} className="hidden" />
-          </label>
-          <button onClick={onClear} className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-red-600 rounded-lg transition">
-            クリア
-          </button>
-        </div>
-      </div>
-
-      {/* アクティブフィルターチップ */}
-      <ActiveFilters
-        filterMention={filterMention} filterHeart={filterHeart} filterDm={filterDm}
-        filterSource={filterSource} searchQuery={searchQuery}
-        setFilterMention={setFilterMention} setFilterHeart={setFilterHeart} setFilterDm={setFilterDm}
-        setFilterSource={setFilterSource} setSearchQuery={setSearchQuery}
-      />
-
-      {/* 統計セクション（折りたたみ可能） */}
-      <div className="mb-4 flex-shrink-0">
-        <button
-          onClick={() => setStatsCollapsed(!statsCollapsed)}
-          className="flex items-center gap-2 text-sm font-semibold text-gray-300 mb-3 hover:text-white transition"
-        >
-          <span>{statsCollapsed ? '▶' : '▼'}</span>
-          統計・フィルター
-          <HelpTip text="各項目をクリックすると、その条件でユーザーを絞り込めます。もう一度クリックで解除します。" />
-        </button>
-
-        {!statsCollapsed && (
-          <>
-            {/* DM統計 */}
-            {stats && (stats.dmStats.open > 0 || stats.dmStats.closed > 0) && (
-              <div className="mb-4 p-4 bg-gray-800 rounded-xl">
-                <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                  ✉ DM開放状態
-                  <HelpTip text="DM開放: ダイレクトメッセージを送れるユーザー\nDM閉鎖: DMを受け付けていないユーザー" />
-                </h3>
-                <div className="flex gap-3">
-                  <div
-                    className={`flex-1 flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition ${
-                      filterDm === 'open' ? 'bg-green-600 shadow-lg shadow-green-600/20' : 'bg-gray-700 hover:bg-gray-600'
-                    }`}
-                    onClick={() => setFilterDm(filterDm === 'open' ? '' : 'open')}
-                  >
-                    <span className="text-sm">開放</span>
-                    <span className="font-bold text-xl">{stats.dmStats.open}</span>
-                  </div>
-                  <div
-                    className={`flex-1 flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition ${
-                      filterDm === 'closed' ? 'bg-red-600 shadow-lg shadow-red-600/20' : 'bg-gray-700 hover:bg-gray-600'
-                    }`}
-                    onClick={() => setFilterDm(filterDm === 'closed' ? '' : 'closed')}
-                  >
-                    <span className="text-sm">閉鎖</span>
-                    <span className="font-bold text-xl">{stats.dmStats.closed}</span>
-                  </div>
-                  <div className="flex-1 flex items-center justify-between p-2.5 rounded-lg bg-gray-700/50">
-                    <span className="text-sm text-gray-500">不明</span>
-                    <span className="font-bold text-xl text-gray-500">{stats.dmStats.unknown}</span>
-                  </div>
-                </div>
+      {/* コントロール部分 */}
+      <div ref={controlsRef} className="flex-shrink-0">
+        {/* ヘッダーバー */}
+        <div className="mb-3 p-4 bg-gray-800 rounded-xl flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              📊 分析結果
+              <span className="text-sm font-normal text-gray-400">
+                {users.length.toLocaleString()}人のデータ
+              </span>
+            </h2>
+            {importedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {importedFiles.map((f, i) => (
+                  <span key={i} className="px-2 py-0.5 text-[11px] bg-gray-700 rounded">{f.name} ({f.count})</span>
+                ))}
               </div>
             )}
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer">
+              <span className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 rounded-lg transition font-medium inline-block">
+                + ファイル追加
+              </span>
+              <input type="file" accept=".json" multiple onChange={onFileImport} className="hidden" />
+            </label>
+            <button onClick={onClear} className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-red-600 rounded-lg transition">
+              クリア
+            </button>
+          </div>
+        </div>
 
-            {/* ファンマーク + ハート */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-              <div className="p-4 bg-gray-800 rounded-xl">
-                <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                  📌 ファンマーク
-                  <HelpTip text="ユーザーのプロフィールや名前にメンバーの情報が含まれている人数です。クリックで絞り込みできます。" />
-                </h3>
-                <div className="space-y-1.5">
-                  {stats && Object.entries(stats.mentionCounts)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([name, data]) => (
-                      <div
-                        key={name}
-                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
-                          filterMention === name ? 'bg-blue-600 shadow-lg shadow-blue-600/20' : 'bg-gray-700 hover:bg-gray-600'
-                        }`}
-                        onClick={() => setFilterMention(filterMention === name ? '' : name)}
-                      >
-                        <span className="text-sm">
-                          {officialAccounts[name]?.fanMark && (
-                            <span className="mr-1.5">{officialAccounts[name].fanMark}</span>
-                          )}
-                          {name}
-                        </span>
-                        <span className="font-bold text-lg">{data.count}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
+        {/* アクティブフィルターチップ */}
+        <ActiveFilters
+          filterMention={filterMention} filterHeart={filterHeart} filterDm={filterDm}
+          filterSource={filterSource} searchQuery={searchQuery}
+          setFilterMention={setFilterMention} setFilterHeart={setFilterHeart} setFilterDm={setFilterDm}
+          setFilterSource={setFilterSource} setSearchQuery={setSearchQuery}
+        />
 
-              <div className="p-4 bg-gray-800 rounded-xl">
-                <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                  🎯 絵文字・ハート
-                  <HelpTip text="プロフィールに含まれる絵文字の統計です。グループ絵文字とハート絵文字で絞り込みできます。" />
-                </h3>
-
-                {/* グループ絵文字 */}
-                {stats && Object.keys(stats.groupEmojiCounts).length > 0 && (
-                  <>
-                    <p className="text-[11px] text-gray-500 mb-1.5 font-medium">グループ絵文字</p>
-                    <div className="grid grid-cols-2 gap-1.5 mb-3">
-                      {Object.entries(stats.groupEmojiCounts)
-                        .sort((a, b) => b[1].count - a[1].count)
-                        .map(([emoji, data]) => (
-                          <div
-                            key={emoji}
-                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
-                              filterHeart === emoji ? 'bg-blue-600 shadow-lg shadow-blue-600/20' : 'bg-gray-700 hover:bg-gray-600'
-                            }`}
-                            onClick={() => setFilterHeart(filterHeart === emoji ? '' : emoji)}
-                          >
-                            <span>
-                              <span className="text-lg mr-1.5">{emoji}</span>
-                              <span className="text-xs text-gray-300">{data.name}</span>
-                            </span>
-                            <span className={`font-bold ${data.count > 0 ? '' : 'text-gray-600'}`}>{data.count}</span>
-                          </div>
-                        ))}
-                    </div>
-                  </>
+        {/* 検索・ソート・表示設定 */}
+        <div className="mb-3 p-4 bg-gray-800 rounded-xl">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-56">
+              <label className="block text-xs text-gray-400 mb-1">検索</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ユーザー名・名前・プロフ・引用..."
+                  className="w-full p-2.5 pl-9 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/30 text-sm"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-600 text-gray-400 text-xs"
+                  >
+                    ×
+                  </button>
                 )}
-
-                {/* ハート絵文字 */}
-                <p className="text-[11px] text-gray-500 mb-1.5 font-medium">ハート絵文字</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {stats && Object.entries(stats.heartCounts)
-                    .filter(([, data]) => data.count > 0)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([emoji, data]) => (
-                      <div
-                        key={emoji}
-                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
-                          filterHeart === emoji ? 'bg-blue-600 shadow-lg shadow-blue-600/20' : 'bg-gray-700 hover:bg-gray-600'
-                        }`}
-                        onClick={() => setFilterHeart(filterHeart === emoji ? '' : emoji)}
-                      >
-                        <span>
-                          <span className="text-lg mr-1.5">{emoji}</span>
-                          <span className="text-xs text-gray-300">{data.name}</span>
-                        </span>
-                        <span className="font-bold">{data.count}</span>
-                      </div>
-                    ))}
-                </div>
               </div>
             </div>
-          </>
-        )}
-      </div>
-
-      {/* 検索・ソート・表示設定 */}
-      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex-shrink-0">
-        <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex-1 min-w-56">
-            <label className="block text-xs text-gray-400 mb-1">検索</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ユーザー名・名前・プロフ・引用..."
-                className="w-full p-2.5 pl-9 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/30 text-sm"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-600 text-gray-400 text-xs"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">並び替え</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="p-2.5 bg-gray-700 rounded-lg border border-gray-600 text-sm"
-            >
-              <option value="index">取得順</option>
-              <option value="username">ユーザー名</option>
-              <option value="name">表示名</option>
-              <option value="followers">フォロワー数</option>
-              <option value="following">フォロー中</option>
-              <option value="statuses">ツイート数</option>
-              <option value="favourites">いいね数</option>
-              <option value="created">作成日(新しい順)</option>
-              <option value="dm">DM開放順</option>
-            </select>
-          </div>
-          {allFileNames.length > 1 && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1">データソース</label>
+              <label className="block text-xs text-gray-400 mb-1">並び替え</label>
               <select
-                value={filterSource}
-                onChange={(e) => setFilterSource(e.target.value)}
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
                 className="p-2.5 bg-gray-700 rounded-lg border border-gray-600 text-sm"
               >
-                <option value="">全て</option>
-                {allFileNames.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+                <option value="index">取得順</option>
+                <option value="username">ユーザー名</option>
+                <option value="name">表示名</option>
+                <option value="followers">フォロワー数</option>
+                <option value="following">フォロー中</option>
+                <option value="statuses">ツイート数</option>
+                <option value="favourites">いいね数</option>
+                <option value="created">作成日(新しい順)</option>
+                <option value="dm">DM開放順</option>
               </select>
+            </div>
+            {allFileNames.length > 1 && (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">データソース</label>
+                <select
+                  value={filterSource}
+                  onChange={(e) => setFilterSource(e.target.value)}
+                  className="p-2.5 bg-gray-700 rounded-lg border border-gray-600 text-sm"
+                >
+                  <option value="">全て</option>
+                  {allFileNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* 表示設定 */}
+          <div className="mt-3 pt-3 border-t border-gray-700 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowFieldSettings(!showFieldSettings)}
+                className="text-xs text-gray-400 hover:text-gray-200 transition flex items-center gap-1"
+              >
+                ⚙ 表示項目 {showFieldSettings ? '▼' : '▶'}
+              </button>
+              <button
+                onClick={() => setCompactCards(!compactCards)}
+                className={`text-xs px-2 py-0.5 rounded transition ${compactCards ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-gray-200'}`}
+              >
+                {compactCards ? '📋 コンパクト' : '📄 詳細'}
+              </button>
+            </div>
+            <span className="text-sm text-gray-400">
+              {filteredUsers.length.toLocaleString()} / {users.length.toLocaleString()}人
+            </span>
+          </div>
+
+          {showFieldSettings && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 p-3 bg-gray-700/50 rounded-lg">
+              {FIELD_OPTIONS.map(f => (
+                <label key={f.key} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleFields[f.key] !== false}
+                    onChange={(e) => setVisibleFields(prev => ({ ...prev, [f.key]: e.target.checked }))}
+                    className="w-3.5 h-3.5 rounded bg-gray-600 border-gray-500 text-blue-500 accent-blue-500"
+                  />
+                  <span className="text-xs text-gray-300">{f.label}</span>
+                </label>
+              ))}
+              <span className="flex gap-2 ml-auto">
+                <button
+                  onClick={() => {
+                    const all = {}
+                    FIELD_OPTIONS.forEach(f => { all[f.key] = true })
+                    setVisibleFields(all)
+                  }}
+                  className="text-xs text-blue-400 hover:underline"
+                >
+                  全ON
+                </button>
+                <button
+                  onClick={() => {
+                    const none = {}
+                    FIELD_OPTIONS.forEach(f => { none[f.key] = false })
+                    setVisibleFields(none)
+                  }}
+                  className="text-xs text-red-400 hover:underline"
+                >
+                  全OFF
+                </button>
+              </span>
             </div>
           )}
         </div>
-
-        {/* 表示設定 */}
-        <div className="mt-3 pt-3 border-t border-gray-700 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowFieldSettings(!showFieldSettings)}
-              className="text-xs text-gray-400 hover:text-gray-200 transition flex items-center gap-1"
-            >
-              ⚙ 表示項目 {showFieldSettings ? '▼' : '▶'}
-            </button>
-            <button
-              onClick={() => setCompactCards(!compactCards)}
-              className={`text-xs px-2 py-0.5 rounded transition ${compactCards ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-gray-200'}`}
-            >
-              {compactCards ? '📋 コンパクト' : '📄 詳細'}
-            </button>
-          </div>
-          <span className="text-sm text-gray-400">
-            {filteredUsers.length.toLocaleString()} / {users.length.toLocaleString()}人
-          </span>
-        </div>
-
-        {showFieldSettings && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 p-3 bg-gray-700/50 rounded-lg">
-            {FIELD_OPTIONS.map(f => (
-              <label key={f.key} className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={visibleFields[f.key] !== false}
-                  onChange={(e) => setVisibleFields(prev => ({ ...prev, [f.key]: e.target.checked }))}
-                  className="w-3.5 h-3.5 rounded bg-gray-600 border-gray-500 text-blue-500 accent-blue-500"
-                />
-                <span className="text-xs text-gray-300">{f.label}</span>
-              </label>
-            ))}
-            <span className="flex gap-2 ml-auto">
-              <button
-                onClick={() => {
-                  const all = {}
-                  FIELD_OPTIONS.forEach(f => { all[f.key] = true })
-                  setVisibleFields(all)
-                }}
-                className="text-xs text-blue-400 hover:underline"
-              >
-                全ON
-              </button>
-              <button
-                onClick={() => {
-                  const none = {}
-                  FIELD_OPTIONS.forEach(f => { none[f.key] = false })
-                  setVisibleFields(none)
-                }}
-                className="text-xs text-red-400 hover:underline"
-              >
-                全OFF
-              </button>
-            </span>
-          </div>
-        )}
       </div>
-
-      </div>{/* controls 閉じ */}
 
       {/* ユーザー一覧（仮想スクロール） */}
       {filteredUsers.length === 0 ? (
