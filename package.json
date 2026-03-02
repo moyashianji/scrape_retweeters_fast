@@ -49,7 +49,9 @@
     },
     "mac": {
       "target": ["dmg", "zip"],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }
   }
 }

@@ -66,6 +66,13 @@ jobs:
           ls -la pyinstaller-dist/
         shell: bash
 
+      - name: Ad-hoc sign backend binary (macOS)
+        if: matrix.platform == 'mac'
+        run: |
+          codesign --force --deep --sign - pyinstaller-dist/backend-server
+          codesign --verify pyinstaller-dist/backend-server && echo "Signed OK" || echo "Sign verify failed"
+        shell: bash
+
       # --- Node.js / Electron ビルド ---
       - uses: actions/setup-node@v4
         with:
@@ -99,6 +106,20 @@ jobs:
         run: npx electron-builder --mac --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Ad-hoc sign .app bundle (macOS)
+        if: matrix.platform == 'mac'
+        run: |
+          APP_PATH=$(find release/mac* -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+          if [ -n "$APP_PATH" ]; then
+            echo "Signing: $APP_PATH"
+            codesign --force --deep --sign - "$APP_PATH"
+            codesign --verify --deep "$APP_PATH" && echo "App signed OK" || echo "App sign verify failed"
+          else
+            echo "No .app found to sign"
+            ls -la release/
+          fi
+        shell: bash
 
       - name: List release output
         if: always()
