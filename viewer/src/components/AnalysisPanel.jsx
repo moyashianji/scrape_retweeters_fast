@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
-import { GROUPS, HEART_EMOJIS, parseFollowerCount, detectFanOf } from '../constants'
+import { useMemo, useState, useRef, useEffect } from 'react'
+import { List } from 'react-window'
+import { GROUPS, HEART_EMOJIS, parseFollowerCount, computeStatsOnePass, getUserSearchText } from '../constants'
 import UserCard from './UserCard'
 import HelpTip from './HelpTip'
 
@@ -88,6 +89,23 @@ function ActiveFilters({ filterMention, filterHeart, filterDm, filterSource, sea
   )
 }
 
+// --- 仮想スクロール用の行コンポーネント ---
+const UserRow = ({ index, style, data }) => {
+  const { filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards } = data
+  const user = filteredUsers[index]
+  return (
+    <div style={{ ...style, paddingBottom: '8px' }}>
+      <UserCard
+        user={user}
+        showSources={allFileNames.length > 1}
+        visibleFields={visibleFields}
+        selectedGroup={selectedGroup}
+        compact={compactCards}
+      />
+    </div>
+  )
+}
+
 export default function AnalysisPanel({
   users, userMap,
   searchQuery, setSearchQuery,
@@ -111,86 +129,58 @@ export default function AnalysisPanel({
   const [statsCollapsed, setStatsCollapsed] = useState(false)
   const [compactCards, setCompactCards] = useState(false)
 
-  // 統計
+  // 仮想スクロール用
+  const listRef = useRef(null)
+  const containerRef = useRef(null)
+  const [listHeight, setListHeight] = useState(600)
+
+  // コンテナの高さを測定
+  useEffect(() => {
+    if (!containerRef.current) return
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setListHeight(entry.contentRect.height)
+      }
+    })
+    obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [users.length > 0])
+
+  // フィルター/ソート変更時にリストを先頭に戻す
+  useEffect(() => {
+    listRef.current?.scrollTo(0)
+  }, [searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy])
+
+  // === 統計: 1パスで全集計 ===
   const stats = useMemo(() => {
     if (users.length === 0) return null
+    return computeStatsOnePass(users, officialAccounts, selectedGroup)
+  }, [users, officialAccounts, selectedGroup])
 
-    const mentionCounts = {}
-    Object.entries(officialAccounts).forEach(([name, accounts]) => {
-      mentionCounts[name] = { accounts, count: 0, users: [] }
-    })
-
-    const heartCounts = {}
-    Object.entries(HEART_EMOJIS).forEach(([emoji, info]) => {
-      heartCounts[emoji] = { ...info, emoji, count: 0, users: [] }
-    })
-
-    users.forEach(user => {
-      const fans = detectFanOf(user, officialAccounts)
-      fans.forEach(name => {
-        mentionCounts[name].count++
-        mentionCounts[name].users.push(user.username)
-      })
-
-      const bio = [user.bio || '', user.name || '', user.quote_text || '', user.location || ''].join(' ')
-      Object.keys(HEART_EMOJIS).forEach(emoji => {
-        if (bio.includes(emoji)) {
-          heartCounts[emoji].count++
-          heartCounts[emoji].users.push(user.username)
-        }
-      })
-    })
-
-    // グループ絵文字カウント（メンバーのfanMark）
-    const groupEmojiCounts = {}
-    Object.entries(officialAccounts).forEach(([name, data]) => {
-      if (!data.fanMark) return
-      groupEmojiCounts[data.fanMark] = { name, emoji: data.fanMark, count: 0, users: [] }
-    })
-    users.forEach(user => {
-      const bio = [user.bio || '', user.name || '', user.quote_text || '', user.location || ''].join(' ')
-      Object.entries(groupEmojiCounts).forEach(([emoji, data]) => {
-        if (bio.includes(emoji)) {
-          data.count++
-          data.users.push(user.username)
-        }
-      })
-    })
-
-    const dmStats = { open: 0, closed: 0, unknown: 0 }
-    users.forEach(user => {
-      if (user.can_dm === true) dmStats.open++
-      else if (user.can_dm === false) dmStats.closed++
-      else dmStats.unknown++
-    })
-
-    return { mentionCounts, heartCounts, groupEmojiCounts, dmStats }
-  }, [users, officialAccounts])
-
-  // フィルタリング
+  // === フィルタリング（fanMapキャッシュを利用） ===
   const filteredUsers = useMemo(() => {
     let result = [...users]
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
-      result = result.filter(user =>
-        (user.username || '').toLowerCase().includes(q) ||
-        (user.name || '').toLowerCase().includes(q) ||
-        (user.bio || '').toLowerCase().includes(q) ||
-        (user.quote_text || '').toLowerCase().includes(q)
-      )
+      result = result.filter(user => {
+        const text = getUserSearchText(user)
+        return text.toLowerCase().includes(q) ||
+          (user.username || '').toLowerCase().includes(q)
+      })
     }
 
-    if (filterMention && officialAccounts[filterMention]) {
+    if (filterMention && officialAccounts[filterMention] && stats) {
+      // fanMap からキャッシュ利用（detectFanOf再計算不要）
       result = result.filter(user => {
-        const fans = detectFanOf(user, officialAccounts)
-        return fans.includes(filterMention)
+        const fans = stats.fanMap.get(user.username)
+        return fans && fans.includes(filterMention)
       })
     }
 
     if (filterHeart) {
       result = result.filter(user => {
-        const text = [user.bio || '', user.name || '', user.quote_text || '', user.location || ''].join(' ')
+        const text = getUserSearchText(user)
         return text.includes(filterHeart)
       })
     }
@@ -231,7 +221,19 @@ export default function AnalysisPanel({
     }
 
     return result
-  }, [users, searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts])
+  }, [users, searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts, stats])
+
+  // 行の高さ（固定サイズ）
+  const itemSize = compactCards ? 48 : 180
+
+  // List に渡すデータ
+  const itemData = useMemo(() => ({
+    filteredUsers,
+    allFileNames,
+    visibleFields,
+    selectedGroup,
+    compactCards,
+  }), [filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards])
 
   // 空状態
   if (users.length === 0) {
@@ -239,14 +241,14 @@ export default function AnalysisPanel({
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       {/* ヘッダーバー */}
-      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex items-center justify-between">
+      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex items-center justify-between flex-shrink-0">
         <div>
           <h2 className="text-lg font-bold flex items-center gap-2">
             📊 分析結果
             <span className="text-sm font-normal text-gray-400">
-              {users.length}人のデータ
+              {users.length.toLocaleString()}人のデータ
             </span>
           </h2>
           {importedFiles.length > 0 && (
@@ -279,7 +281,7 @@ export default function AnalysisPanel({
       />
 
       {/* 統計セクション（折りたたみ可能） */}
-      <div className="mb-4">
+      <div className="mb-4 flex-shrink-0">
         <button
           onClick={() => setStatsCollapsed(!statsCollapsed)}
           className="flex items-center gap-2 text-sm font-semibold text-gray-300 mb-3 hover:text-white transition"
@@ -416,7 +418,7 @@ export default function AnalysisPanel({
       </div>
 
       {/* 検索・ソート・表示設定 */}
-      <div className="mb-4 p-4 bg-gray-800 rounded-xl">
+      <div className="mb-4 p-4 bg-gray-800 rounded-xl flex-shrink-0">
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-56">
             <label className="block text-xs text-gray-400 mb-1">検索</label>
@@ -491,7 +493,7 @@ export default function AnalysisPanel({
             </button>
           </div>
           <span className="text-sm text-gray-400">
-            {filteredUsers.length} / {users.length}人
+            {filteredUsers.length.toLocaleString()} / {users.length.toLocaleString()}人
           </span>
         </div>
 
@@ -534,25 +536,26 @@ export default function AnalysisPanel({
         )}
       </div>
 
-      {/* ユーザー一覧 */}
+      {/* ユーザー一覧（仮想スクロール） */}
       {filteredUsers.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 flex-shrink-0">
           <div className="text-4xl mb-3">🔍</div>
           <p className="text-sm">条件に一致するユーザーが見つかりません</p>
           <p className="text-xs mt-1">フィルター条件を変更してみてください</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {filteredUsers.map((user, index) => (
-            <UserCard
-              key={user.username || index}
-              user={user}
-              showSources={allFileNames.length > 1}
-              visibleFields={visibleFields}
-              selectedGroup={selectedGroup}
-              compact={compactCards}
-            />
-          ))}
+        <div ref={containerRef} className="flex-1 min-h-0">
+          <List
+            ref={listRef}
+            height={listHeight}
+            itemCount={filteredUsers.length}
+            itemSize={itemSize}
+            itemData={itemData}
+            overscanCount={10}
+            className="scrollbar-thin"
+          >
+            {UserRow}
+          </List>
         </div>
       )}
     </div>

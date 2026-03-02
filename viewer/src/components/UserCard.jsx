@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { GROUPS, HEART_EMOJIS, detectFanOf } from '../constants'
+import { GROUPS, HEART_EMOJIS, detectFanOf, getUserSearchText } from '../constants'
 
 function formatCreatedAt(str) {
   if (!str) return ''
@@ -16,13 +16,17 @@ export default function UserCard({ user, showSources, visibleFields = {}, select
   const [expanded, setExpanded] = useState(false)
   const officialAccounts = useMemo(() => GROUPS[selectedGroup]?.members || {}, [selectedGroup])
 
+  // _fanCache があればキャッシュから取得（computeStatsOnePassで事前計算済み）
   const mentionedAccounts = useMemo(() => {
+    if (user._fanCache && user._fanCache[selectedGroup]) {
+      return user._fanCache[selectedGroup]
+    }
     return detectFanOf(user, officialAccounts)
-  }, [user, officialAccounts])
+  }, [user, officialAccounts, selectedGroup])
 
   const usedHearts = useMemo(() => {
-    const bio = (user.bio || '') + ' ' + (user.name || '')
-    return Object.keys(HEART_EMOJIS).filter(emoji => bio.includes(emoji))
+    const text = getUserSearchText(user)
+    return Object.keys(HEART_EMOJIS).filter(emoji => text.includes(emoji))
   }, [user])
 
   // コンパクトモード

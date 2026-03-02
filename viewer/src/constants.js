@@ -209,20 +209,103 @@ export const HEART_EMOJIS = {
  * @returns {string[]} マッチしたメンバー名の配列
  */
 export function detectFanOf(user, members) {
-  // A: quote_text も対象, F: location も対象
-  const raw = [user.bio || '', user.name || '', user.quote_text || '', user.location || ''].join(' ')
+  const raw = getUserSearchText(user)
   const lower = raw.toLowerCase()
 
   const matched = []
   Object.entries(members).forEach(([name, data]) => {
     const hasMention = data.mentions.some(acc => lower.includes(`@${acc.toLowerCase()}`))
     const hasKeyword = data.keywords.some(kw => lower.includes(kw.toLowerCase()))
-    // B: ファンマーク絵文字判定（fanEmojis配列 or 単一fanMark）
     const emojis = data.fanEmojis || (data.fanMark ? [data.fanMark] : [])
     const hasFanMark = emojis.some(emoji => raw.includes(emoji))
     if (hasMention || hasKeyword || hasFanMark) matched.push(name)
   })
   return matched
+}
+
+/**
+ * bio+name+quote_text+location の結合文字列を取得（キャッシュ付き）
+ */
+export function getUserSearchText(user) {
+  if (user._searchText !== undefined) return user._searchText
+  user._searchText = [user.bio || '', user.name || '', user.quote_text || '', user.location || ''].join(' ')
+  return user._searchText
+}
+
+/**
+ * ユーザー配列に対して一括でファン判定+ハート判定+DM統計を1パスで実行。
+ * user._fanCache[groupId] にファン結果をキャッシュして再利用。
+ * @returns {{ mentionCounts, heartCounts, groupEmojiCounts, dmStats, fanMap }}
+ */
+export function computeStatsOnePass(users, members, groupId) {
+  const heartEmojis = Object.keys(HEART_EMOJIS)
+
+  // 結果バケット初期化
+  const mentionCounts = {}
+  Object.entries(members).forEach(([name]) => {
+    mentionCounts[name] = { count: 0, users: [] }
+  })
+
+  const heartCounts = {}
+  Object.entries(HEART_EMOJIS).forEach(([emoji, info]) => {
+    heartCounts[emoji] = { ...info, emoji, count: 0, users: [] }
+  })
+
+  const groupEmojiCounts = {}
+  Object.entries(members).forEach(([name, data]) => {
+    if (!data.fanMark) return
+    groupEmojiCounts[data.fanMark] = { name, emoji: data.fanMark, count: 0, users: [] }
+  })
+
+  const dmStats = { open: 0, closed: 0, unknown: 0 }
+
+  // fanMap: username -> string[] (キャッシュ結果を返す)
+  const fanMap = new Map()
+
+  // === 1パスで全統計を計算 ===
+  for (const user of users) {
+    // ファン判定（キャッシュ利用）
+    if (!user._fanCache) user._fanCache = {}
+    let fans
+    if (user._fanCache[groupId]) {
+      fans = user._fanCache[groupId]
+    } else {
+      fans = detectFanOf(user, members)
+      user._fanCache[groupId] = fans
+    }
+    fanMap.set(user.username, fans)
+
+    for (const name of fans) {
+      mentionCounts[name].count++
+      mentionCounts[name].users.push(user.username)
+    }
+
+    // テキスト結合（キャッシュ付き）
+    const bio = getUserSearchText(user)
+
+    // ハート絵文字
+    for (const emoji of heartEmojis) {
+      if (bio.includes(emoji)) {
+        heartCounts[emoji].count++
+        heartCounts[emoji].users.push(user.username)
+      }
+    }
+
+    // グループ絵文字
+    for (const emoji in groupEmojiCounts) {
+      if (bio.includes(emoji)) {
+        groupEmojiCounts[emoji].count++
+        groupEmojiCounts[emoji].users.push(user.username)
+      }
+    }
+
+    // DM統計
+    if (user.can_dm === true) dmStats.open++
+    else if (user.can_dm === false) dmStats.closed++
+    else dmStats.unknown++
+  }
+
+  return { mentionCounts, heartCounts, groupEmojiCounts, dmStats, fanMap }
 }
 
 export function parseFollowerCount(str) {

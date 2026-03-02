@@ -5,7 +5,7 @@ import {
   RadialLinearScale, Tooltip, Legend, Title,
 } from 'chart.js'
 import { Bar, Doughnut, Line, Radar } from 'react-chartjs-2'
-import { GROUPS, HEART_EMOJIS, parseFollowerCount, detectFanOf } from '../constants'
+import { GROUPS, HEART_EMOJIS, parseFollowerCount, detectFanOf, getUserSearchText } from '../constants'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, ArcElement, PointElement, LineElement, Filler,
@@ -37,7 +37,10 @@ function groupUsers(users, groupId) {
   const result = {}
   Object.keys(members).forEach(name => { result[name] = [] })
   users.forEach(user => {
-    const fans = detectFanOf(user, members)
+    // _fanCache があれば再計算を回避
+    const fans = (user._fanCache && user._fanCache[groupId])
+      ? user._fanCache[groupId]
+      : detectFanOf(user, members)
     fans.forEach(name => { result[name].push(user.username) })
   })
   return result
@@ -192,8 +195,12 @@ function CrossHeatmap({ groupData }) {
             namesB.forEach(b => { matrix[a][b] = 0 })
           })
           allUsers.forEach(user => {
-            const fansA = detectFanOf(user, membersA)
-            const fansB = detectFanOf(user, membersB)
+            const fansA = (user._fanCache && user._fanCache[gdA.def.id])
+              ? user._fanCache[gdA.def.id]
+              : detectFanOf(user, membersA)
+            const fansB = (user._fanCache && user._fanCache[gdB.def.id])
+              ? user._fanCache[gdB.def.id]
+              : detectFanOf(user, membersB)
             fansA.forEach(a => { fansB.forEach(b => { matrix[a][b]++ }) })
           })
           const maxVal = Math.max(1, ...namesA.flatMap(a => namesB.map(b => matrix[a][b])))
@@ -552,8 +559,8 @@ function HeartRadar({ groupData }) {
     const counts = {}
     Object.keys(HEART_EMOJIS).forEach(e => { counts[e] = 0 })
     users.forEach(u => {
-      const bio = (u.bio || '') + ' ' + (u.name || '')
-      Object.keys(HEART_EMOJIS).forEach(e => { if (bio.includes(e)) counts[e]++ })
+      const text = getUserSearchText(u)
+      Object.keys(HEART_EMOJIS).forEach(e => { if (text.includes(e)) counts[e]++ })
     })
     return counts
   }
@@ -634,19 +641,21 @@ function TriangleMap({ groupData }) {
 
   // 各ユーザーのグループ所属を計算
   const userData = useMemo(() => {
+    // Set を一度だけ作成（ループ外）
+    const setA = new Set(gA.users.map(u => u.username))
+    const setB = new Set(gB.users.map(u => u.username))
+    const setC = new Set(gC.users.map(u => u.username))
+
     return allUsernames.map(username => {
       const user = allUsersMap[username]
-      const setA = new Set(gA.users.map(u => u.username))
-      const setB = new Set(gB.users.map(u => u.username))
-      const setC = new Set(gC.users.map(u => u.username))
       const inA = setA.has(username)
       const inB = setB.has(username)
       const inC = setC.has(username)
 
-      // ファン判定でスコア化
-      const fanA = detectFanOf(user, membersA).length
-      const fanB = detectFanOf(user, membersB).length
-      const fanC = detectFanOf(user, membersC).length
+      // _fanCache があれば再計算を回避
+      const fanA = ((user._fanCache && user._fanCache[gA.def.id]) || detectFanOf(user, membersA)).length
+      const fanB = ((user._fanCache && user._fanCache[gB.def.id]) || detectFanOf(user, membersB)).length
+      const fanC = ((user._fanCache && user._fanCache[gC.def.id]) || detectFanOf(user, membersC)).length
 
       return { username, inA, inB, inC, fanA, fanB, fanC }
     }).filter(d => d.inA || d.inB || d.inC)
