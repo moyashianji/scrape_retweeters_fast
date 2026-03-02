@@ -9,6 +9,7 @@ export default function Sidebar({
   onStartScrape, onSelectJob, onLoadResults,
   selectedJobId, hasRunningJob,
   history, onLoadHistory, onDeleteHistory,
+  importedFiles,
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -51,6 +52,24 @@ export default function Sidebar({
           onLoadHistory={onLoadHistory}
           onDeleteHistory={onDeleteHistory}
         />
+        {/* 読み込み済みファイル一覧 */}
+        {importedFiles && importedFiles.length > 0 && (
+          <div className="border-t border-gray-700">
+            <div className="px-4 py-2 text-sm font-semibold text-gray-200 flex items-center gap-2">
+              <span className="w-5 h-5 flex items-center justify-center rounded-full bg-purple-600 text-[10px] font-bold">📁</span>
+              読込済みデータ
+              <span className="text-xs text-gray-500 font-normal">({importedFiles.length}件)</span>
+            </div>
+            <div className="max-h-40 overflow-y-auto divide-y divide-gray-700/50">
+              {importedFiles.map((f, i) => (
+                <div key={i} className="px-4 py-2 text-xs text-gray-400 flex items-center justify-between">
+                  <span className="truncate mr-2" title={f.name}>{f.name}</span>
+                  <span className="text-gray-500 flex-shrink-0">{f.count}人</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <LogPanel
         logs={logs}

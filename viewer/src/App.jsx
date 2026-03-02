@@ -498,6 +498,7 @@ function App() {
           history={history}
           onLoadHistory={handleLoadHistory}
           onDeleteHistory={handleDeleteHistory}
+          importedFiles={importedFiles}
         />
 
         {/* メインエリア */}

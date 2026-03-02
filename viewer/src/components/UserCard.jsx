@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { GROUPS, HEART_EMOJIS, detectFanOf, getUserSearchText } from '../constants'
 
 function formatCreatedAt(str) {
@@ -12,8 +12,13 @@ function formatCreatedAt(str) {
   }
 }
 
-export default function UserCard({ user, showSources, visibleFields = {}, selectedGroup, compact = false }) {
-  const [expanded, setExpanded] = useState(false)
+function needsTruncation(text) {
+  if (!text) return false
+  return text.length > 80 || (text.match(/\n/g) || []).length >= 3
+}
+
+export default function UserCard({ user, showSources, visibleFields = {}, selectedGroup, compact = false, expanded = false, onToggleExpand }) {
+  const toggleExpand = () => onToggleExpand?.(user.username)
   const officialAccounts = useMemo(() => GROUPS[selectedGroup]?.members || {}, [selectedGroup])
 
   // _fanCache があればキャッシュから取得（computeStatsOnePassで事前計算済み）
@@ -174,17 +179,16 @@ export default function UserCard({ user, showSources, visibleFields = {}, select
           {visibleFields.bio !== false && user.bio && (
             <div className="mt-2 p-2.5 bg-gray-700/50 rounded-lg border-l-2 border-gray-600">
               <p
-                className={`text-sm text-gray-300 whitespace-pre-wrap cursor-pointer ${!expanded && 'line-clamp-3'}`}
-                onClick={() => setExpanded(!expanded)}
+                className={`text-sm text-gray-300 whitespace-pre-wrap ${!expanded && 'line-clamp-3'}`}
               >
                 {user.bio}
               </p>
-              {user.bio.length > 100 && (
+              {needsTruncation(user.bio) && (
                 <button
-                  onClick={() => setExpanded(!expanded)}
+                  onClick={toggleExpand}
                   className="text-[11px] text-blue-400 hover:underline mt-1"
                 >
-                  {expanded ? '折りたたむ' : '...続きを読む'}
+                  {expanded ? '折りたたむ' : 'もっと見る'}
                 </button>
               )}
             </div>
@@ -195,11 +199,18 @@ export default function UserCard({ user, showSources, visibleFields = {}, select
             <div className="mt-2 p-2.5 bg-blue-900/20 rounded-lg border-l-2 border-blue-500">
               <p className="text-[11px] text-blue-400 mb-1 font-medium">💬 引用ツイート</p>
               <p
-                className={`text-sm text-gray-200 whitespace-pre-wrap cursor-pointer ${!expanded && 'line-clamp-3'}`}
-                onClick={() => setExpanded(!expanded)}
+                className={`text-sm text-gray-200 whitespace-pre-wrap ${!expanded && 'line-clamp-3'}`}
               >
                 {user.quote_text}
               </p>
+              {needsTruncation(user.quote_text) && (
+                <button
+                  onClick={toggleExpand}
+                  className="text-[11px] text-blue-400 hover:underline mt-1"
+                >
+                  {expanded ? '折りたたむ' : 'もっと見る'}
+                </button>
+              )}
             </div>
           )}
 

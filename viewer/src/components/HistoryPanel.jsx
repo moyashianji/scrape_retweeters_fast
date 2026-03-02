@@ -59,26 +59,26 @@ export default function HistoryPanel({ history, onLoadHistory, onDeleteHistory }
               </p>
 
               <div className="flex gap-2 mt-2">
-                {job.status === 'completed' && job.result_count > 0 && (
+                {job.result_count > 0 && (
                   <>
                     <button
                       onClick={() => onLoadHistory(job.id)}
                       className="px-2.5 py-1 text-xs bg-green-600 hover:bg-green-700 rounded-lg transition font-medium"
                     >
-                      📊 結果を見る
+                      📊 復元する
                     </button>
                     <a
                       href={getHistoryCsvUrl(job.id)}
                       download
                       className="px-2.5 py-1 text-xs bg-purple-600 hover:bg-purple-700 rounded-lg transition font-medium"
                     >
-                      CSV保存
+                      CSV
                     </a>
                   </>
                 )}
                 <button
                   onClick={() => onDeleteHistory(job.id)}
-                  className="px-2.5 py-1 text-xs bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white rounded-lg transition"
+                  className="px-2.5 py-1 text-xs bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white rounded-lg transition ml-auto"
                 >
                   削除
                 </button>

@@ -90,7 +90,7 @@ function ActiveFilters({ filterMention, filterHeart, filterDm, filterSource, sea
 
 // --- 仮想スクロール用の行コンポーネント ---
 const UserRow = ({ index, style, data }) => {
-  const { filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards } = data
+  const { filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards, expandedUsers, onToggleExpand } = data
   const user = filteredUsers[index]
   return (
     <div style={{ ...style, paddingBottom: '8px' }}>
@@ -100,6 +100,8 @@ const UserRow = ({ index, style, data }) => {
         visibleFields={visibleFields}
         selectedGroup={selectedGroup}
         compact={compactCards}
+        expanded={expandedUsers.has(user.username)}
+        onToggleExpand={onToggleExpand}
       />
     </div>
   )
@@ -126,6 +128,18 @@ export default function AnalysisPanel({
   })
   const [showFieldSettings, setShowFieldSettings] = useState(false)
   const [compactCards, setCompactCards] = useState(false)
+  const [expandedUsers, setExpandedUsers] = useState(new Set())
+
+  const onToggleExpand = useCallback((username) => {
+    setExpandedUsers(prev => {
+      const next = new Set(prev)
+      if (next.has(username)) next.delete(username)
+      else next.add(username)
+      return next
+    })
+    // 仮想スクロールの高さを再計算
+    setTimeout(() => listRef.current?.resetAfterIndex(0), 0)
+  }, [])
 
   // 仮想スクロール用
   const listRef = useRef(null)
@@ -234,15 +248,31 @@ export default function AnalysisPanel({
     return result
   }, [users, searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts, stats])
 
-  // 行の高さ推定
+  // 行の高さ推定（展開状態を考慮）
   const getItemSize = useCallback((index) => {
     if (compactCards) return 56
     const user = filteredUsers[index]
+    const isExpanded = expandedUsers.has(user?.username)
     let h = 110
-    if (visibleFields.bio !== false && user?.bio) h += 60
-    if (visibleFields.quote !== false && user?.quote_text) h += 60
+    if (visibleFields.bio !== false && user?.bio) {
+      if (isExpanded) {
+        // 展開時: テキスト長から推定（1行≈40文字、行高16px）
+        const lines = Math.max(user.bio.split('\n').length, Math.ceil(user.bio.length / 40))
+        h += Math.min(lines * 18 + 40, 400)
+      } else {
+        h += 60
+      }
+    }
+    if (visibleFields.quote !== false && user?.quote_text) {
+      if (isExpanded) {
+        const lines = Math.max(user.quote_text.split('\n').length, Math.ceil(user.quote_text.length / 40))
+        h += Math.min(lines * 18 + 50, 400)
+      } else {
+        h += 60
+      }
+    }
     return h
-  }, [compactCards, filteredUsers, visibleFields])
+  }, [compactCards, filteredUsers, visibleFields, expandedUsers])
 
   // サイズ変更時にリストをリセット
   useEffect(() => {
@@ -256,7 +286,9 @@ export default function AnalysisPanel({
     visibleFields,
     selectedGroup,
     compactCards,
-  }), [filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards])
+    expandedUsers,
+    onToggleExpand,
+  }), [filteredUsers, allFileNames, visibleFields, selectedGroup, compactCards, expandedUsers, onToggleExpand])
 
   // 空状態
   if (users.length === 0) {
