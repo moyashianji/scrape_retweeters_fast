@@ -132,11 +132,10 @@ app.whenReady().then(async () => {
   try {
     const port = await startBackend()
     process.env.BACKEND_PORT = port.toString()
-    createWindow()
   } catch (err) {
-    console.error('Failed to start:', err)
-    app.quit()
+    console.error('Backend startup failed (continuing without backend):', err)
   }
+  createWindow()
 })
 
 app.on('window-all-closed', () => {
@@ -155,7 +154,7 @@ app.on('before-quit', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (app.isReady() && BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
 })
