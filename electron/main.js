@@ -21,96 +21,104 @@ function findFreePort() {
   })
 }
 
-// --- Python バックエンド起動 ---
+// --- パス ---
 function getProjectRoot() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'backend-bundle')
   }
-  // dev: electron/main.js → プロジェクトルートは1つ上
   return path.resolve(__dirname, '..')
 }
 
+// --- バンドル済み実行ファイルを探す ---
+function findBundledBackend() {
+  const root = getProjectRoot()
+  // PyInstaller でビルドしたバイナリを探す
+  const candidates = [
+    path.join(root, 'backend-server'),         // macOS / Linux
+    path.join(root, 'backend-server.exe'),      // Windows
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      // 実行権限があるか確認 (macOS/Linux)
+      try { fs.accessSync(p, fs.constants.X_OK) } catch {
+        try { fs.chmodSync(p, 0o755) } catch { /* ignore */ }
+      }
+      return p
+    }
+  }
+  return null
+}
+
+// --- Python フォールバック (dev モード用) ---
+function findPython() {
+  if (process.platform === 'win32') return 'python'
+  const candidates = [
+    '/opt/homebrew/bin/python3',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3',
+  ]
+  try {
+    const shellPath = execSync('/bin/bash -lc "which python3"', { timeout: 3000 }).toString().trim()
+    if (shellPath && !candidates.includes(shellPath)) candidates.unshift(shellPath)
+  } catch { /* ignore */ }
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p } catch { /* ignore */ }
+  }
+  return 'python3'
+}
+
 function getMacShellEnv() {
-  // macOS の .app はシェルの PATH を継承しない。ログインシェルから取得する
   try {
     const env = execSync('/bin/bash -lc "env"', { timeout: 5000 }).toString()
     const result = {}
     for (const line of env.split('\n')) {
       const idx = line.indexOf('=')
-      if (idx > 0) {
-        result[line.substring(0, idx)] = line.substring(idx + 1)
-      }
+      if (idx > 0) result[line.substring(0, idx)] = line.substring(idx + 1)
     }
     return result
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
-function findPython() {
-  if (process.platform === 'win32') {
-    return 'python'
-  }
-  // macOS の .app はシェルの PATH を継承しないため、よくあるパスを直接探す
-  const candidates = [
-    '/opt/homebrew/bin/python3',   // Apple Silicon Homebrew
-    '/usr/local/bin/python3',      // Intel Homebrew / 公式インストーラ
-    '/usr/bin/python3',            // macOS 標準
-  ]
-  // シェルから PATH を取得して追加候補を探す
-  try {
-    const shellPath = execSync('/bin/bash -lc "which python3"', { timeout: 3000 }).toString().trim()
-    if (shellPath && !candidates.includes(shellPath)) {
-      candidates.unshift(shellPath)
-    }
-  } catch { /* ignore */ }
-
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) return p
-    } catch { /* ignore */ }
-  }
-  return 'python3' // フォールバック
-}
-
+// --- バックエンド起動 ---
 async function startBackend() {
   backendPort = await findFreePort()
   const projectRoot = getProjectRoot()
-  const pythonCmd = findPython()
 
-  const args = [
-    '-u',
-    '-c',
-    `import sys; sys.path.insert(0, r"${projectRoot}"); import uvicorn; uvicorn.run("backend.app:app", host="127.0.0.1", port=${backendPort}, log_level="warning")`
-  ]
+  // 1. バンドル済み実行ファイルを試す (ユーザーはPython不要)
+  const bundledPath = findBundledBackend()
+
+  let cmd, args, spawnEnv
+
+  if (bundledPath) {
+    console.log(`Using bundled backend: ${bundledPath}`)
+    cmd = bundledPath
+    args = [String(backendPort)]
+    spawnEnv = { ...process.env }
+  } else {
+    // 2. フォールバック: システムの Python を使う (dev モード)
+    console.log('No bundled backend found, falling back to Python')
+    const pythonCmd = findPython()
+    cmd = pythonCmd
+    args = [
+      '-u', '-c',
+      `import sys; sys.path.insert(0, r"${projectRoot}"); import uvicorn; uvicorn.run("backend.app:app", host="127.0.0.1", port=${backendPort}, log_level="warning")`
+    ]
+    spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' }
+
+    // macOS .app ではシェルの環境変数を取得
+    if (process.platform === 'darwin' && app.isPackaged) {
+      const shellEnv = getMacShellEnv()
+      if (shellEnv) spawnEnv = { ...shellEnv, PYTHONIOENCODING: 'utf-8' }
+    }
+  }
 
   console.log(`Starting backend on port ${backendPort}...`)
-  console.log(`Python: ${pythonCmd}`)
+  console.log(`Command: ${cmd}`)
   console.log(`Project root: ${projectRoot}`)
-
-  // macOS .app ではシェルの環境変数を取得して spawn に渡す
-  let spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' }
-  if (process.platform === 'darwin' && app.isPackaged) {
-    const shellEnv = getMacShellEnv()
-    if (shellEnv) {
-      spawnEnv = { ...shellEnv, PYTHONIOENCODING: 'utf-8' }
-      console.log(`Using shell PATH: ${shellEnv.PATH?.substring(0, 200)}`)
-    }
-  }
-
-  // Python に必要なパスを確実に含める
-  const extraPaths = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
-  if (spawnEnv.PATH) {
-    const existing = spawnEnv.PATH.split(':')
-    for (const p of extraPaths) {
-      if (!existing.includes(p)) existing.push(p)
-    }
-    spawnEnv.PATH = existing.join(':')
-  }
 
   let stderrOutput = ''
 
-  pythonProcess = spawn(pythonCmd, args, {
+  pythonProcess = spawn(cmd, args, {
     cwd: projectRoot,
     env: spawnEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -127,14 +135,14 @@ async function startBackend() {
   })
 
   pythonProcess.on('error', (err) => {
-    console.error('Failed to start Python backend:', err.message)
-    backendError = `Python起動失敗: ${err.message}`
+    console.error('Failed to start backend:', err.message)
+    backendError = `バックエンド起動失敗: ${err.message}`
   })
 
   pythonProcess.on('exit', (code) => {
-    console.log(`Python backend exited with code ${code}`)
+    console.log(`Backend exited with code ${code}`)
     if (code !== 0 && code !== null) {
-      backendError = `Python異常終了 (code ${code}):\n${stderrOutput.slice(-500)}`
+      backendError = `バックエンド異常終了 (code ${code}):\n${stderrOutput.slice(-500)}`
     }
     pythonProcess = null
   })
@@ -188,25 +196,19 @@ function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
-    // ビルド済みReactアプリを読み込む
     const indexPath = path.join(__dirname, '..', 'viewer', 'dist', 'index.html')
     mainWindow.loadFile(indexPath)
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
-
+  mainWindow.on('closed', () => { mainWindow = null })
   mainWindow.setMenuBarVisibility(false)
 }
 
-// --- IPC ハンドラ ---
-ipcMain.handle('get-backend-info', () => {
-  return {
-    port: backendPort,
-    error: backendError,
-  }
-})
+// --- IPC ---
+ipcMain.handle('get-backend-info', () => ({
+  port: backendPort,
+  error: backendError,
+}))
 
 // --- アプリ起動 ---
 app.whenReady().then(async () => {
@@ -222,18 +224,12 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
-  }
+  if (pythonProcess) { pythonProcess.kill(); pythonProcess = null }
   app.quit()
 })
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
-  }
+  if (pythonProcess) { pythonProcess.kill(); pythonProcess = null }
 })
 
 app.on('activate', () => {

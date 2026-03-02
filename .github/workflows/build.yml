@@ -21,6 +21,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --- Python バックエンドを PyInstaller でビルド ---
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller fastapi uvicorn[standard] pydantic selenium webdriver-manager
+
+      - name: Build backend with PyInstaller
+        run: |
+          pyinstaller --onefile --name backend-server \
+            --hidden-import backend.app \
+            --hidden-import backend.job_manager \
+            --hidden-import backend.scraper_engine \
+            --hidden-import backend.chrome_utils \
+            --hidden-import backend.log_capture \
+            --hidden-import backend.db \
+            --hidden-import scrapers \
+            --hidden-import scrapers.common \
+            --hidden-import scrapers.retweeters_fast \
+            --hidden-import scrapers.retweeters_hover \
+            --hidden-import scrapers.quotes \
+            --hidden-import uvicorn.logging \
+            --hidden-import uvicorn.loops \
+            --hidden-import uvicorn.loops.auto \
+            --hidden-import uvicorn.protocols \
+            --hidden-import uvicorn.protocols.http \
+            --hidden-import uvicorn.protocols.http.auto \
+            --hidden-import uvicorn.protocols.websockets \
+            --hidden-import uvicorn.protocols.websockets.auto \
+            --hidden-import uvicorn.lifespan \
+            --hidden-import uvicorn.lifespan.on \
+            --hidden-import uvicorn.lifespan.off \
+            --add-data "backend:backend" \
+            --add-data "scrapers:scrapers" \
+            backend/run_server.py
+        shell: bash
+
+      - name: Prepare PyInstaller output for Electron
+        run: |
+          mkdir -p pyinstaller-dist
+          cp dist/backend-server* pyinstaller-dist/
+          ls -la pyinstaller-dist/
+        shell: bash
+
+      # --- Node.js / Electron ビルド ---
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -38,6 +84,10 @@ jobs:
 
       - name: Verify frontend build
         run: ls viewer/dist/index.html
+        shell: bash
+
+      - name: Verify PyInstaller output
+        run: ls -la pyinstaller-dist/
         shell: bash
 
       - name: Build Electron (Windows)
@@ -105,8 +155,11 @@ jobs:
             Automated build from commit ${{ github.sha }}
 
             ## Downloads
-            - **Windows**: `.exe` installer
-            - **macOS**: `.dmg` disk image / `.zip` archive
+            - **Windows**: `.exe` installer (Python同梱済み、追加インストール不要)
+            - **macOS**: `.dmg` disk image / `.zip` archive (Python同梱済み、追加インストール不要)
+
+            ## 必要なもの
+            - Google Chrome (スクレイピングに使用)
           files: |
             artifacts/**/*.exe
             artifacts/**/*.dmg

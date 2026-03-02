@@ -24,18 +24,19 @@
     ],
     "extraResources": [
       {
+        "from": "pyinstaller-dist/",
+        "to": "backend-bundle/",
+        "filter": ["**/*"]
+      },
+      {
         "from": "backend",
         "to": "backend-bundle/backend",
-        "filter": [
-          "**/*.py"
-        ]
+        "filter": ["**/*.py"]
       },
       {
         "from": "scrapers",
         "to": "backend-bundle/scrapers",
-        "filter": [
-          "**/*.py"
-        ]
+        "filter": ["**/*.py"]
       }
     ],
     "win": {
