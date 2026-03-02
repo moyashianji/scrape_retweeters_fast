@@ -27,7 +27,7 @@ function ToastItem({ toast, onRemove }) {
       <span className="w-6 h-6 flex items-center justify-center rounded-full bg-white/20 text-xs font-bold flex-shrink-0">
         {ICONS[toast.type] || ICONS.info}
       </span>
-      <span className="flex-1">{toast.message}</span>
+      <span className="flex-1 whitespace-pre-line">{toast.message}</span>
       <button
         onClick={() => onRemove(toast.id)}
         className="text-white/60 hover:text-white text-lg leading-none ml-2"
@@ -40,7 +40,7 @@ function ToastItem({ toast, onRemove }) {
 
 export function ToastContainer({ toasts, removeToast }) {
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-md">
       {toasts.map(t => (
         <ToastItem key={t.id} toast={t} onRemove={removeToast} />
       ))}

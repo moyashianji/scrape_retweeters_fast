@@ -231,7 +231,7 @@ function App() {
       addToast('データ取得を開始しました', 'info')
       fetchJobs()
     } catch (err) {
-      addToast('サーバーに接続できません。バックエンドが起動しているか確認してください。', 'error', 8000)
+      addToast(err.message || 'サーバーに接続できません。バックエンドが起動しているか確認してください。', 'error', 10000)
     }
   }, [fetchJobs, addToast])
 
