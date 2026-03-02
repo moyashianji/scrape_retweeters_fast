@@ -126,6 +126,13 @@ jobs:
         run: ls -la release/ || echo "No release directory"
         shell: bash
 
+      - name: Prepare macOS helper script
+        if: matrix.platform == 'mac'
+        run: |
+          chmod +x build/fix-macos-warning.command
+          cp build/fix-macos-warning.command release/fix-macos-warning.command
+        shell: bash
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -134,6 +141,7 @@ jobs:
             release/*.exe
             release/*.dmg
             release/*.zip
+            release/*.command
             !release/*-unpacked/**
           if-no-files-found: error
 
@@ -178,12 +186,21 @@ jobs:
             ## Downloads
             - **Windows**: `.exe` installer (Python同梱済み、追加インストール不要)
             - **macOS**: `.dmg` disk image / `.zip` archive (Python同梱済み、追加インストール不要)
+            - **macOS ヘルパー**: `fix-macos-warning.command` (セキュリティ警告解除用)
 
             ## 必要なもの
             - Google Chrome (スクレイピングに使用)
+
+            ## macOS でセキュリティ警告が出る場合
+            1. `fix-macos-warning.command` をダウンロード
+            2. アプリを `/Applications` にインストール後、ヘルパーをダブルクリック
+            3. 「ターミナルからのアクセス」を許可 → 完了！
+
+            または手動で: アプリを右クリック → 「開く」→「開く」で起動できます。
           files: |
             artifacts/**/*.exe
             artifacts/**/*.dmg
             artifacts/**/*.zip
+            artifacts/**/*.command
           draft: false
           prerelease: false

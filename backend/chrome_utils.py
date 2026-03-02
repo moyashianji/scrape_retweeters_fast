@@ -9,9 +9,24 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 def get_base_dir():
-    """ベースディレクトリを取得（PyInstaller対応）"""
+    """ベースディレクトリを取得（PyInstaller対応）
+
+    パッケージ版: ユーザーの書き込み可能ディレクトリを返す
+      - Windows: %APPDATA%/XCampaignPicker
+      - macOS:   ~/Library/Application Support/XCampaignPicker
+    開発版: プロジェクトルートを返す
+    """
     if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
+        if sys.platform == 'darwin':
+            base = os.path.join(os.path.expanduser('~'),
+                                'Library', 'Application Support', 'XCampaignPicker')
+        elif sys.platform == 'win32':
+            base = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')),
+                                'XCampaignPicker')
+        else:
+            base = os.path.join(os.path.expanduser('~'), '.xcampaignpicker')
+        os.makedirs(base, exist_ok=True)
+        return base
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
