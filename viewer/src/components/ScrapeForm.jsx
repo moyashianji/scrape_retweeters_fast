@@ -24,7 +24,7 @@ const SCRAPER_TYPES = [
 
 export default function ScrapeForm({ onSubmit, disabled }) {
   const [url, setUrl] = useState('')
-  const [scraperType, setScraperType] = useState('retweeters_fast')
+  const [scraperType, setScraperType] = useState('retweeters_hover')
   const [maxUsers, setMaxUsers] = useState(500)
   const [useCache, setUseCache] = useState(true)
 
