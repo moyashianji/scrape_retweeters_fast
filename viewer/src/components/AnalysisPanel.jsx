@@ -1,5 +1,5 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
-import { List } from 'react-window'
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
+import { VariableSizeList } from 'react-window'
 import { GROUPS, HEART_EMOJIS, parseFollowerCount, computeStatsOnePass, getUserSearchText } from '../constants'
 import UserCard from './UserCard'
 import HelpTip from './HelpTip'
@@ -223,8 +223,20 @@ export default function AnalysisPanel({
     return result
   }, [users, searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts, stats])
 
-  // 行の高さ（固定サイズ）
-  const itemSize = compactCards ? 48 : 180
+  // 行の高さ推定
+  const getItemSize = useCallback((index) => {
+    if (compactCards) return 56
+    const user = filteredUsers[index]
+    let h = 110
+    if (visibleFields.bio !== false && user?.bio) h += 60
+    if (visibleFields.quote !== false && user?.quote_text) h += 60
+    return h
+  }, [compactCards, filteredUsers, visibleFields])
+
+  // サイズ変更時にリストをリセット
+  useEffect(() => {
+    listRef.current?.resetAfterIndex(0)
+  }, [compactCards, visibleFields, filteredUsers])
 
   // List に渡すデータ
   const itemData = useMemo(() => ({
@@ -545,17 +557,17 @@ export default function AnalysisPanel({
         </div>
       ) : (
         <div ref={containerRef} className="flex-1 min-h-0">
-          <List
+          <VariableSizeList
             ref={listRef}
             height={listHeight}
             itemCount={filteredUsers.length}
-            itemSize={itemSize}
+            itemSize={getItemSize}
             itemData={itemData}
             overscanCount={10}
             className="scrollbar-thin"
           >
             {UserRow}
-          </List>
+          </VariableSizeList>
         </div>
       )}
     </div>
