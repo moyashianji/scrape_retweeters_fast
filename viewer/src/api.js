@@ -16,7 +16,36 @@ function getWsBase() {
   return `${protocol}//${window.location.host}`
 }
 
+// バックエンド接続チェック（エラー詳細をユーザーに表示）
+async function checkBackendOrThrow() {
+  const base = getApiBase()
+  if (base) return // ポートが設定されていればOK
+
+  // Electron 環境でポートがない = バックエンド起動失敗
+  if (window.electronAPI?.getBackendInfo) {
+    try {
+      const info = await window.electronAPI.getBackendInfo()
+      if (info.error) {
+        throw new Error(
+          `バックエンドの起動に失敗しました。\n\n` +
+          `原因: ${info.error}\n\n` +
+          `対処法:\n` +
+          `1. Python3がインストールされているか確認\n` +
+          `2. ターミナルで以下を実行:\n` +
+          `   pip3 install fastapi uvicorn selenium webdriver-manager pydantic`
+        )
+      }
+    } catch (e) {
+      if (e.message.includes('バックエンド')) throw e
+    }
+  }
+  throw new Error(
+    'サーバーに接続できません。バックエンドが起動しているか確認してください。'
+  )
+}
+
 export async function startScrape({ scraperType, url, maxUsers, useCache = true }) {
+  await checkBackendOrThrow()
   const res = await fetch(`${getApiBase()}/api/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
