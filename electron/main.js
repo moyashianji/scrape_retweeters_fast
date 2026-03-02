@@ -3,6 +3,9 @@ const path = require('path')
 const { spawn } = require('child_process')
 const net = require('net')
 
+const fs = require('fs')
+const { execSync } = require('child_process')
+
 let mainWindow = null
 let pythonProcess = null
 let backendPort = null
@@ -28,11 +31,37 @@ function getProjectRoot() {
   return path.resolve(__dirname, '..')
 }
 
+function findPython() {
+  if (process.platform === 'win32') {
+    return 'python'
+  }
+  // macOS の .app はシェルの PATH を継承しないため、よくあるパスを直接探す
+  const candidates = [
+    '/opt/homebrew/bin/python3',   // Apple Silicon Homebrew
+    '/usr/local/bin/python3',      // Intel Homebrew / 公式インストーラ
+    '/usr/bin/python3',            // macOS 標準
+  ]
+  // シェルから PATH を取得して追加候補を探す
+  try {
+    const shellPath = execSync('/bin/bash -lc "which python3"', { timeout: 3000 }).toString().trim()
+    if (shellPath && !candidates.includes(shellPath)) {
+      candidates.unshift(shellPath)
+    }
+  } catch { /* ignore */ }
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p
+    } catch { /* ignore */ }
+  }
+  return 'python3' // フォールバック
+}
+
 async function startBackend() {
   backendPort = await findFreePort()
   const projectRoot = getProjectRoot()
 
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+  const pythonCmd = findPython()
 
   const args = [
     '-u',
@@ -41,6 +70,7 @@ async function startBackend() {
   ]
 
   console.log(`Starting backend on port ${backendPort}...`)
+  console.log(`Python: ${pythonCmd}`)
   console.log(`Project root: ${projectRoot}`)
 
   pythonProcess = spawn(pythonCmd, args, {
