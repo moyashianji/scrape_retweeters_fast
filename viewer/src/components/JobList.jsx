@@ -1,4 +1,4 @@
-import { getCsvDownloadUrl } from '../api'
+import { getCsvDownloadUrl, cancelJob } from '../api'
 
 const STATUS_INFO = {
   pending: { icon: '⏳', label: '待機中', color: 'text-yellow-400' },
@@ -78,12 +78,20 @@ export default function JobList({ jobs, selectedJobId, onSelect, onLoadResults }
                 </div>
               )}
 
-              {job.status === 'running' && (
+              {(job.status === 'running' || job.status === 'pending') && (
                 <div className="mt-2">
                   <div className="w-full h-1.5 bg-gray-600 rounded-full overflow-hidden">
                     <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: '100%' }} />
                   </div>
-                  <p className="text-[10px] text-blue-400 mt-1">処理中です...ログで進捗を確認できます</p>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-[10px] text-blue-400">処理中です...ログで進捗を確認できます</p>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); cancelJob(job.id) }}
+                      className="px-2 py-0.5 text-[10px] bg-red-600 hover:bg-red-700 rounded transition font-medium"
+                    >
+                      中止
+                    </button>
+                  </div>
                 </div>
               )}
 

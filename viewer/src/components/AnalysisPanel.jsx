@@ -130,6 +130,13 @@ export default function AnalysisPanel({
   const [compactCards, setCompactCards] = useState(false)
   const [expandedUsers, setExpandedUsers] = useState(new Set())
 
+  // 検索デバウンス（入力は即時、フィルタリングは300ms遅延）
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
   const onToggleExpand = useCallback((username) => {
     setExpandedUsers(prev => {
       const next = new Set(prev)
@@ -187,8 +194,8 @@ export default function AnalysisPanel({
   const filteredUsers = useMemo(() => {
     let result = [...users]
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
+    if (debouncedQuery) {
+      const q = debouncedQuery.toLowerCase()
       result = result.filter(user => {
         const text = getUserSearchText(user)
         return text.toLowerCase().includes(q) ||
@@ -246,7 +253,7 @@ export default function AnalysisPanel({
     }
 
     return result
-  }, [users, searchQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts, stats])
+  }, [users, debouncedQuery, filterMention, filterHeart, filterDm, filterSource, sortBy, officialAccounts, stats])
 
   // 行の高さ推定（展開状態を考慮）
   const getItemSize = useCallback((index) => {
@@ -278,6 +285,44 @@ export default function AnalysisPanel({
   useEffect(() => {
     listRef.current?.resetAfterIndex(0)
   }, [compactCards, visibleFields, filteredUsers])
+
+  // === エクスポート機能 ===
+  const exportCsv = useCallback(() => {
+    const fields = ['username', 'name', 'followers_count', 'following_count',
+      'statuses_count', 'favourites_count', 'media_count', 'listed_count',
+      'bio', 'quote_text', 'verified', 'is_blue_verified', 'can_dm',
+      'protected', 'created_at', 'location', 'url', 'rest_id']
+    const header = fields.join(',')
+    const rows = filteredUsers.map(user =>
+      fields.map(f => {
+        let v = user[f] ?? ''
+        v = String(v).replace(/"/g, '""').replace(/[\n\r]/g, ' ')
+        return `"${v}"`
+      }).join(',')
+    )
+    const csv = '\uFEFF' + header + '\n' + rows.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `filtered_${filteredUsers.length}users.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [filteredUsers])
+
+  const exportJson = useCallback(() => {
+    const clean = filteredUsers.map(u => {
+      const { _sources, _searchText, _fanCache, ...rest } = u
+      return rest
+    })
+    const blob = new Blob([JSON.stringify(clean, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `filtered_${filteredUsers.length}users.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [filteredUsers])
 
   // List に渡すデータ
   const itemData = useMemo(() => ({
@@ -412,9 +457,29 @@ export default function AnalysisPanel({
                 {compactCards ? '📋 コンパクト' : '📄 詳細'}
               </button>
             </div>
-            <span className="text-sm text-gray-400">
-              {filteredUsers.length.toLocaleString()} / {users.length.toLocaleString()}人
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400">
+                {filteredUsers.length.toLocaleString()} / {users.length.toLocaleString()}人
+              </span>
+              {filteredUsers.length > 0 && (
+                <div className="flex gap-1">
+                  <button
+                    onClick={exportCsv}
+                    className="px-2 py-0.5 text-[10px] bg-purple-600 hover:bg-purple-700 rounded transition font-medium"
+                    title="フィルタ結果をCSVでダウンロード"
+                  >
+                    CSV
+                  </button>
+                  <button
+                    onClick={exportJson}
+                    className="px-2 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded transition font-medium"
+                    title="フィルタ結果をJSONでダウンロード"
+                  >
+                    JSON
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {showFieldSettings && (

@@ -89,7 +89,7 @@ def extract_user_data_basic(driver, cell):
     return data
 
 
-def scrape_retweeters(url, max_users=500):
+def scrape_retweeters(url, max_users=500, cancel_check=None):
     """リツイーターを取得（詳細版・GraphQL API使用）"""
     print("=" * 60)
     print("リツイーター取得 (詳細版)")
@@ -121,6 +121,10 @@ def scrape_retweeters(url, max_users=500):
         no_change_count = 0
 
         while len(retweeters) < max_users:
+            if cancel_check and cancel_check():
+                print("\n取得がキャンセルされました。")
+                break
+
             user_cells = driver.find_elements(By.CSS_SELECTOR, '[data-testid="UserCell"]')
 
             for cell in user_cells:

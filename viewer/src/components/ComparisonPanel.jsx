@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, BarElement, ArcElement, PointElement, LineElement, Filler,
@@ -835,9 +835,19 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
   // データのあるグループIDをデフォルトで選択
   const defaultSelected = useMemo(() =>
     allGroupData.filter(gd => gd.users.length > 0).map(gd => gd.def.id),
-    [] // 初期値のみ
+    [allGroupData]
   )
   const [selectedIds, setSelectedIds] = useState(defaultSelected)
+
+  // 新しいグループデータが追加されたら選択に反映
+  useEffect(() => {
+    setSelectedIds(prev => {
+      const withData = allGroupData.filter(gd => gd.users.length > 0).map(gd => gd.def.id)
+      const newIds = withData.filter(id => !prev.includes(id))
+      if (newIds.length > 0) return [...prev, ...newIds]
+      return prev
+    })
+  }, [allGroupData])
 
   // 選択変更時にデータのあるグループを自動追加
   const effectiveSelected = useMemo(() => {
@@ -862,33 +872,20 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <div className="text-6xl mb-6">📊</div>
-        <h2 className="text-xl font-bold mb-2">比較データがありません</h2>
+        <h2 className="text-xl font-bold mb-2">分析データがありません</h2>
         <p className="text-gray-400 max-w-md mb-4">
-          比較するには、複数グループのデータを読み込んでください。
+          データを読み込むとグループ分析・比較ができます。
         </p>
         <div className="text-sm text-gray-500 space-y-1">
-          <p>1. ヘッダーでグループを切り替えてそれぞれスクレイプ</p>
+          <p>1. ヘッダーでグループを選択してスクレイプまたはファイル追加</p>
           <p>2. 完了後「結果を見る」でデータを読み込み</p>
-          <p>3. この比較タブでチャートが表示されます</p>
+          <p>3. このタブでチャートが表示されます</p>
+          <p className="text-gray-600 mt-2">※ 2つ以上のグループを読み込むと比較チャートも表示されます</p>
         </div>
       </div>
     )
   }
 
-  if (loadedCount < 2) {
-    const loaded = allGroupData.find(gd => gd.users.length > 0)
-    const missing = allGroupData.filter(gd => gd.users.length === 0).map(gd => getGroupLabel(gd.def)).join('、')
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="text-5xl mb-4">⚠️</div>
-        <h2 className="text-lg font-bold mb-2">2つ以上のグループデータが必要です</h2>
-        <p className="text-gray-400 max-w-md">
-          現在: {getGroupLabel(loaded.def)} {loaded.users.length}人のみ
-          <br />未読込: {missing}
-        </p>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-4">
@@ -896,7 +893,7 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
       <div className="p-4 bg-gray-800 rounded-xl space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold flex items-center gap-2">📊 グループ比較</h2>
+            <h2 className="text-lg font-bold flex items-center gap-2">📊 {loadedCount >= 2 ? 'グループ比較' : 'グループ分析'}</h2>
             <p className="text-xs text-gray-400 mt-0.5">
               {filteredGroupData.filter(gd => gd.users.length > 0).map(gd =>
                 `${getGroupShortLabel(gd.def)}: ${gd.users.length}人`

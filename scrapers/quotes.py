@@ -49,7 +49,7 @@ def extract_quote_from_article(driver, article):
     return username, name, quote_text
 
 
-def scrape_quotes(url, max_users=500):
+def scrape_quotes(url, max_users=500, cancel_check=None):
     """引用ツイートを取得"""
     print("=" * 60)
     print("引用ツイート取得")
@@ -83,6 +83,10 @@ def scrape_quotes(url, max_users=500):
         max_scroll_pos = 0
 
         while len(quotes) < max_users:
+            if cancel_check and cancel_check():
+                print("\n取得がキャンセルされました。")
+                break
+
             articles = driver.find_elements(By.CSS_SELECTOR, 'article[data-testid="tweet"]')
 
             for article in articles:

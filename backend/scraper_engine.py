@@ -61,15 +61,19 @@ def run_scraper_job(job, job_manager):
         job.started_at = datetime.now().isoformat()
         job_manager.notify_status(job)
 
+        # キャンセルチェック用コールバック
+        def check_cancelled():
+            return job.status == "cancelled"
+
         if job.scraper_type == "retweeters_fast":
             from scrapers.retweeters_fast import scrape_retweeters
-            results = scrape_retweeters(job.url, job.max_users)
+            results = scrape_retweeters(job.url, job.max_users, cancel_check=check_cancelled)
         elif job.scraper_type == "retweeters_hover":
             from scrapers.retweeters_hover import scrape_retweeters
-            results = scrape_retweeters(job.url, job.max_users)
+            results = scrape_retweeters(job.url, job.max_users, cancel_check=check_cancelled)
         elif job.scraper_type == "quotes":
             from scrapers.quotes import scrape_quotes
-            results = scrape_quotes(job.url, job.max_users)
+            results = scrape_quotes(job.url, job.max_users, cancel_check=check_cancelled)
         else:
             raise ValueError(f"Unknown scraper type: {job.scraper_type}")
 
@@ -87,9 +91,12 @@ def run_scraper_job(job, job_manager):
         db.save_job(job)
         db.cache_users(results)
 
-        job.status = "completed"
-        job.completed_at = datetime.now().isoformat()
-        print(f"\n完了: {len(results)}件取得しました。")
+        if job.status == "cancelled":
+            print(f"\n中止: {len(results)}件まで取得済み（部分保存しました）")
+        else:
+            job.status = "completed"
+            job.completed_at = datetime.now().isoformat()
+            print(f"\n完了: {len(results)}件取得しました。")
 
     except Exception as e:
         job.status = "failed"

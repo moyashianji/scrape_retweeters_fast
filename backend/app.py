@@ -133,6 +133,19 @@ async def get_job_logs(job_id: str):
     return {"lines": job.log_lines}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    job = job_manager.get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    if job.status not in ("pending", "running"):
+        return JSONResponse(status_code=400, content={"error": "Job is not running"})
+    job.status = "cancelled"
+    job.completed_at = __import__("datetime").datetime.now().isoformat()
+    job_manager.notify_status(job)
+    return {"ok": True, "status": "cancelled"}
+
+
 # --- 履歴 API ---
 
 @app.get("/api/history")

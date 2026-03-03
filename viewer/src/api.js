@@ -16,6 +16,16 @@ function getWsBase() {
   return `${protocol}//${window.location.host}`
 }
 
+// レスポンスチェック付きfetch
+async function safeFetch(url, options) {
+  const res = await fetch(url, options)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `サーバーエラー (${res.status})`)
+  }
+  return res.json()
+}
+
 // バックエンド接続チェック（エラー詳細をユーザーに表示）
 async function checkBackendOrThrow() {
   const base = getApiBase()
@@ -46,7 +56,7 @@ async function checkBackendOrThrow() {
 
 export async function startScrape({ scraperType, url, maxUsers, useCache = true }) {
   await checkBackendOrThrow()
-  const res = await fetch(`${getApiBase()}/api/scrape`, {
+  return safeFetch(`${getApiBase()}/api/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -56,27 +66,22 @@ export async function startScrape({ scraperType, url, maxUsers, useCache = true 
       use_cache: useCache,
     }),
   })
-  return res.json()
 }
 
 export async function listJobs() {
-  const res = await fetch(`${getApiBase()}/api/jobs`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/jobs`)
 }
 
 export async function getJobResults(jobId) {
-  const res = await fetch(`${getApiBase()}/api/jobs/${jobId}/results`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/jobs/${jobId}/results`)
 }
 
 export async function getJobLogs(jobId) {
-  const res = await fetch(`${getApiBase()}/api/jobs/${jobId}/logs`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/jobs/${jobId}/logs`)
 }
 
 export async function cancelJob(jobId) {
-  const res = await fetch(`${getApiBase()}/api/jobs/${jobId}/cancel`, { method: 'POST' })
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/jobs/${jobId}/cancel`, { method: 'POST' })
 }
 
 export function getCsvDownloadUrl(jobId) {
@@ -90,13 +95,11 @@ export function createWebSocket() {
 // --- 履歴 API ---
 
 export async function listHistory(limit = 100, offset = 0) {
-  const res = await fetch(`${getApiBase()}/api/history?limit=${limit}&offset=${offset}`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/history?limit=${limit}&offset=${offset}`)
 }
 
 export async function getHistoryResults(jobId) {
-  const res = await fetch(`${getApiBase()}/api/history/${jobId}/results`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/history/${jobId}/results`)
 }
 
 export function getHistoryCsvUrl(jobId) {
@@ -104,11 +107,9 @@ export function getHistoryCsvUrl(jobId) {
 }
 
 export async function deleteHistory(jobId) {
-  const res = await fetch(`${getApiBase()}/api/history/${jobId}`, { method: 'DELETE' })
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/history/${jobId}`, { method: 'DELETE' })
 }
 
 export async function getCacheStats() {
-  const res = await fetch(`${getApiBase()}/api/cache/stats`)
-  return res.json()
+  return safeFetch(`${getApiBase()}/api/cache/stats`)
 }

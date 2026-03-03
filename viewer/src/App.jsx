@@ -136,14 +136,18 @@ function App() {
       }
 
       ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data)
-        if (msg.type === 'log') {
-          setLogs(prev => ({
-            ...prev,
-            [msg.job_id]: [...(prev[msg.job_id] || []), msg.line],
-          }))
-        } else if (msg.type === 'status') {
-          fetchJobs()
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'log') {
+            setLogs(prev => ({
+              ...prev,
+              [msg.job_id]: [...(prev[msg.job_id] || []), msg.line],
+            }))
+          } else if (msg.type === 'status') {
+            fetchJobs()
+          }
+        } catch {
+          // 不正なJSONは無視
         }
       }
     } catch {
