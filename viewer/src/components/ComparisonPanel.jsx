@@ -780,7 +780,7 @@ function SummaryStats({ groupData }) {
   }
 
   const statRows = [
-    { label: '総ユーザー数', values: active.map(gd => gd.users.length) },
+    { label: 'ファン検出数', values: active.map(gd => gd.users.length) },
     { label: '平均フォロワー', values: active.map(gd => avgFollowers(gd.users)) },
     { label: '中央値フォロワー', values: active.map(gd => medianFollowers(gd.users)) },
     {
@@ -891,6 +891,21 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
     [activeGroupData, effectiveSelected]
   )
 
+  // クロス分析モード: 各グループのファンだけに絞ったデータ（サマリー/DM/フォロワー/年齢/ハート用）
+  const fanFilteredGroupData = useMemo(() => {
+    if (!crossAnalysis) return filteredGroupData
+    return filteredGroupData.map(gd => {
+      const members = GROUPS[gd.def.id]?.members || {}
+      const fans = gd.users.filter(user => {
+        const f = (user._fanCache && user._fanCache[gd.def.id])
+          ? user._fanCache[gd.def.id]
+          : detectFanOf(user, members)
+        return f.length > 0
+      })
+      return { ...gd, users: fans }
+    })
+  }, [crossAnalysis, filteredGroupData])
+
   const totalUsers = ampUsers.length + snkUsers.length + knxUsers.length + mtorUsers.length
   const loadedCount = allGroupData.filter(gd => gd.users.length > 0).length
   const is3GroupMode = filteredGroupData.filter(gd => gd.users.length > 0).length >= 3
@@ -957,7 +972,7 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
         />
       </div>
 
-      <SummaryStats groupData={filteredGroupData} />
+      <SummaryStats groupData={fanFilteredGroupData} />
       {!crossAnalysis && <VennDiagram groupData={filteredGroupData} />}
 
       {/* 3グループ選択時のトライアングルマップ */}
@@ -968,12 +983,12 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
         <FanCountBar groupData={filteredGroupData} />
         <GroupShareDoughnuts groupData={filteredGroupData} />
       </div>
-      <DmComparisonBar groupData={filteredGroupData} />
+      <DmComparisonBar groupData={fanFilteredGroupData} />
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <FollowerHistogram groupData={filteredGroupData} />
-        <AccountAgeChart groupData={filteredGroupData} />
+        <FollowerHistogram groupData={fanFilteredGroupData} />
+        <AccountAgeChart groupData={fanFilteredGroupData} />
       </div>
-      <HeartRadar groupData={filteredGroupData} />
+      <HeartRadar groupData={fanFilteredGroupData} />
     </div>
   )
 }
