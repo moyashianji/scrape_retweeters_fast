@@ -57,7 +57,7 @@ const commonScaleOpts = {
 // ============================================================
 // Group Selector
 // ============================================================
-function GroupSelector({ allGroupData, selectedIds, setSelectedIds }) {
+function GroupSelector({ allGroupData, selectedIds, setSelectedIds, crossMode }) {
   const toggle = (id) => {
     setSelectedIds(prev => {
       if (prev.includes(id)) {
@@ -72,10 +72,10 @@ function GroupSelector({ allGroupData, selectedIds, setSelectedIds }) {
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-xs text-gray-500">比較対象:</span>
+      <span className="text-xs text-gray-500">{crossMode ? '分析対象:' : '比較対象:'}</span>
       {allGroupData.map(gd => {
         const active = selectedIds.includes(gd.def.id)
-        const hasData = gd.users.length > 0
+        const hasData = crossMode || gd.users.length > 0
         return (
           <button
             key={gd.def.id}
@@ -91,15 +91,17 @@ function GroupSelector({ allGroupData, selectedIds, setSelectedIds }) {
             style={active && hasData ? { backgroundColor: gd.def.color } : {}}
           >
             {getGroupShortLabel(gd.def)}
-            <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold ${
-              active ? 'bg-white/20' : 'bg-gray-700'
-            }`}>
-              {gd.users.length}
-            </span>
+            {!crossMode && (
+              <span className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold ${
+                active ? 'bg-white/20' : 'bg-gray-700'
+              }`}>
+                {gd.users.length}
+              </span>
+            )}
           </button>
         )
       })}
-      {allGroupData.filter(gd => gd.users.length > 0).length >= 3 && (
+      {allGroupData.filter(gd => crossMode || gd.users.length > 0).length >= 3 && (
         <button
           onClick={selectAll}
           className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 transition"
@@ -163,7 +165,7 @@ function VennDiagram({ groupData }) {
 // ============================================================
 function CrossHeatmap({ groupData }) {
   const active = groupData.filter(gd => gd.users.length > 0)
-  if (active.length < 2) return null
+  if (active.length < 2) return null  // クロス分析モードでは全グループにデータがあるので常に表示
 
   const allUsers = useMemo(() => {
     const map = {}
@@ -832,6 +834,22 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
     { def: GROUP_DEFS[3], users: mtorUsers },
   ], [ampUsers, snkUsers, knxUsers, mtorUsers])
 
+  // 全グループ分析モード（1つのデータでも全グループのメンバーで分析）
+  const [crossAnalysis, setCrossAnalysis] = useState(false)
+
+  // 全ユーザーの統合マップ（重複排除）
+  const mergedUsers = useMemo(() => {
+    const map = {}
+    allGroupData.forEach(gd => gd.users.forEach(u => { if (u.username) map[u.username] = u }))
+    return Object.values(map)
+  }, [allGroupData])
+
+  // クロス分析モード時: 全グループに同じユーザーセットを割り当て
+  const crossGroupData = useMemo(() =>
+    GROUP_DEFS.map(def => ({ def, users: mergedUsers })),
+    [mergedUsers]
+  )
+
   // データのあるグループIDをデフォルトで選択
   const defaultSelected = useMemo(() =>
     allGroupData.filter(gd => gd.users.length > 0).map(gd => gd.def.id),
@@ -849,19 +867,28 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
     })
   }, [allGroupData])
 
+  // クロス分析ON時の選択ID
+  const [crossSelectedIds, setCrossSelectedIds] = useState(GROUP_DEFS.map(d => d.id))
+
+  // 現在のモードに応じたデータとセレクター
+  const activeGroupData = crossAnalysis ? crossGroupData : allGroupData
+  const activeSelectedIds = crossAnalysis ? crossSelectedIds : selectedIds
+  const activeSetSelectedIds = crossAnalysis ? setCrossSelectedIds : setSelectedIds
+
   // 選択変更時にデータのあるグループを自動追加
   const effectiveSelected = useMemo(() => {
+    if (crossAnalysis) {
+      return crossSelectedIds.length > 0 ? crossSelectedIds : GROUP_DEFS.map(d => d.id)
+    }
     const withData = allGroupData.filter(gd => gd.users.length > 0).map(gd => gd.def.id)
-    // 選択されているがデータなしを除外、かつデータありのもののみ残す
     const valid = selectedIds.filter(id => withData.includes(id))
-    // 何も選択されていなければデータありを全部選択
     if (valid.length === 0) return withData
     return valid
-  }, [selectedIds, allGroupData])
+  }, [crossAnalysis, crossSelectedIds, selectedIds, allGroupData])
 
   const filteredGroupData = useMemo(() =>
-    allGroupData.filter(gd => effectiveSelected.includes(gd.def.id)),
-    [allGroupData, effectiveSelected]
+    activeGroupData.filter(gd => effectiveSelected.includes(gd.def.id)),
+    [activeGroupData, effectiveSelected]
   )
 
   const totalUsers = ampUsers.length + snkUsers.length + knxUsers.length + mtorUsers.length
@@ -880,7 +907,6 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
           <p>1. ヘッダーでグループを選択してスクレイプまたはファイル追加</p>
           <p>2. 完了後「結果を見る」でデータを読み込み</p>
           <p>3. このタブでチャートが表示されます</p>
-          <p className="text-gray-600 mt-2">※ 2つ以上のグループを読み込むと比較チャートも表示されます</p>
         </div>
       </div>
     )
@@ -893,31 +919,49 @@ export default function ComparisonPanel({ ampUsers, snkUsers, knxUsers, mtorUser
       <div className="p-4 bg-gray-800 rounded-xl space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold flex items-center gap-2">📊 {loadedCount >= 2 ? 'グループ比較' : 'グループ分析'}</h2>
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              📊 {crossAnalysis ? 'クロスグループ分析' : loadedCount >= 2 ? 'グループ比較' : 'グループ分析'}
+            </h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {filteredGroupData.filter(gd => gd.users.length > 0).map(gd =>
-                `${getGroupShortLabel(gd.def)}: ${gd.users.length}人`
-              ).join(' / ')}
+              {crossAnalysis
+                ? `全${mergedUsers.length}人を全グループのメンバーで分析`
+                : filteredGroupData.filter(gd => gd.users.length > 0).map(gd =>
+                    `${getGroupShortLabel(gd.def)}: ${gd.users.length}人`
+                  ).join(' / ')
+              }
             </p>
           </div>
-          {is3GroupMode && (
-            <span className="px-2.5 py-1 text-[10px] font-bold bg-gradient-to-r from-blue-600 via-emerald-600 to-purple-600 rounded-full text-white">
-              3グループ比較
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {is3GroupMode && !crossAnalysis && (
+              <span className="px-2.5 py-1 text-[10px] font-bold bg-gradient-to-r from-blue-600 via-emerald-600 to-purple-600 rounded-full text-white">
+                3グループ比較
+              </span>
+            )}
+            <button
+              onClick={() => setCrossAnalysis(prev => !prev)}
+              className={`px-3 py-1.5 text-[11px] rounded-lg transition font-medium border ${
+                crossAnalysis
+                  ? 'bg-amber-600 border-amber-500 text-white'
+                  : 'border-gray-600 text-gray-400 hover:text-white hover:border-gray-500'
+              }`}
+            >
+              {crossAnalysis ? '🔀 クロス分析 ON' : '🔀 クロス分析'}
+            </button>
+          </div>
         </div>
         <GroupSelector
-          allGroupData={allGroupData}
+          allGroupData={activeGroupData}
           selectedIds={effectiveSelected}
-          setSelectedIds={setSelectedIds}
+          setSelectedIds={activeSetSelectedIds}
+          crossMode={crossAnalysis}
         />
       </div>
 
       <SummaryStats groupData={filteredGroupData} />
-      <VennDiagram groupData={filteredGroupData} />
+      {!crossAnalysis && <VennDiagram groupData={filteredGroupData} />}
 
       {/* 3グループ選択時のトライアングルマップ */}
-      {is3GroupMode && <TriangleMap groupData={filteredGroupData} />}
+      {is3GroupMode && !crossAnalysis && <TriangleMap groupData={filteredGroupData} />}
 
       <CrossHeatmap groupData={filteredGroupData} />
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
