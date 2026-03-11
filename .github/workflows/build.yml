@@ -116,9 +116,23 @@ jobs:
         run: ls -la pyinstaller-dist/
         shell: bash
 
+      - name: Sign backend binary (Windows)
+        if: matrix.platform == 'win' && env.WIN_CSC_LINK != ''
+        run: |
+          echo "$WIN_CSC_LINK" | base64 -d > cert.pfx
+          signtool sign /f cert.pfx /p "$WIN_CSC_KEY_PASSWORD" /tr http://timestamp.digicert.com /td sha256 /fd sha256 pyinstaller-dist/backend-server.exe
+          rm -f cert.pfx
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
       - name: Build Electron (Windows)
         if: matrix.platform == 'win'
         run: npx electron-builder --win --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Build Electron (macOS)
         if: matrix.platform == 'mac'
